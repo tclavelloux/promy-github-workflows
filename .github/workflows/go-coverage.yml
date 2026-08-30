@@ -32,6 +32,16 @@ on:
         required: false
         type: string
         default: ""
+      coverage-artifact:
+        description: Name of the artifact (uploaded by the caller's test job) containing the raw `go test -coverprofile` output. The caller is responsible for running tests with whatever services (databases, Redis, ...) they need — this workflow only gates and reports on the resulting profile.
+        required: false
+        type: string
+        default: coverage-profile
+      profile-filename:
+        description: Filename of the coverage profile inside the artifact.
+        required: false
+        type: string
+        default: coverage.raw.out
 
 permissions:
   contents: read
@@ -47,20 +57,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run tests
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.coverage-artifact }}
+
+      - name: Filter coverage profile
         id: test
         run: |
-          go test -race -failfast -coverpkg=./... -covermode=atomic -coverprofile=coverage.raw.out -count=1 ./...
-
           EXCLUDE_ARGS=()
           while IFS= read -r pattern; do
             [ -n "$pattern" ] && EXCLUDE_ARGS+=(-e "$pattern")
           done <<< "${{ inputs.exclude-patterns }}"
 
           if [ "${#EXCLUDE_ARGS[@]}" -gt 0 ]; then
-            grep -Ev "${EXCLUDE_ARGS[@]}" coverage.raw.out > coverage.out
+            grep -Ev "${EXCLUDE_ARGS[@]}" "${{ inputs.profile-filename }}" > coverage.out
           else
-            cp coverage.raw.out coverage.out
+            cp "${{ inputs.profile-filename }}" coverage.out
           fi
 
           echo "total=$(go tool cover -func coverage.out | grep total: | awk '{print $3}')" >> "$GITHUB_OUTPUT"
