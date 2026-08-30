@@ -1,0 +1,134 @@
+name: Go Coverage Gate
+
+on:
+  workflow_call:
+    inputs:
+      total-threshold:
+        description: Fail the build if total coverage drops below this percentage.
+        required: true
+        type: number
+      package-threshold:
+        description: Fail the build if any package's coverage drops below this percentage. 0 disables the check.
+        required: false
+        type: number
+        default: 0
+      exclude-patterns:
+        description: Newline-separated regexes excluded from the coverage profile before gating (matched against the raw profile paths).
+        required: false
+        type: string
+        default: |
+          main\.go$
+          internal/bootstrap\.go$
+          ^cmd/
+          test/mock\.go$
+          testdata
+      post-pr-comment:
+        description: Post/refresh a coverage breakdown comment on the triggering PR.
+        required: false
+        type: boolean
+        default: true
+      module-prefix:
+        description: Go module prefix stripped from paths in the PR comment, e.g. github.com/org/repo/.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        id: test
+        run: |
+          go test -race -failfast -coverpkg=./... -covermode=atomic -coverprofile=coverage.raw.out -count=1 ./...
+
+          EXCLUDE_ARGS=()
+          while IFS= read -r pattern; do
+            [ -n "$pattern" ] && EXCLUDE_ARGS+=(-e "$pattern")
+          done <<< "${{ inputs.exclude-patterns }}"
+
+          if [ "${#EXCLUDE_ARGS[@]}" -gt 0 ]; then
+            grep -Ev "${EXCLUDE_ARGS[@]}" coverage.raw.out > coverage.out
+          else
+            cp coverage.raw.out coverage.out
+          fi
+
+          echo "total=$(go tool cover -func coverage.out | grep total: | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+
+      - name: Write coverage config
+        run: |
+          cat > .testcoverage.ci.yml <<EOF
+          profile: coverage.out
+          threshold:
+            file: 0
+            package: ${{ inputs.package-threshold }}
+            total: ${{ inputs.total-threshold }}
+          EOF
+
+      - name: Enforce coverage thresholds
+        uses: vladopajic/go-test-coverage@v2
+        with:
+          config: ./.testcoverage.ci.yml
+
+      - name: Add coverage comment
+        if: inputs.post-pr-comment && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MODULE="${{ inputs.module-prefix }}"
+
+          PKG_REPORT=$(go tool cover -func coverage.out \
+            | grep -v "^total:" \
+            | sed "s|${MODULE}||" \
+            | awk -F: '{split($0,a,"\t"); pkg=$1; sub(/\/[^/]*$/, "", pkg); cov=a[length(a)]} {seen[pkg]++; sum[pkg]+=cov+0} END {for(p in seen) printf "%s %s\n", p, sprintf("%.1f%%", sum[p]/seen[p])}' \
+            | sort -t' ' -k2 -n \
+            | column -t)
+
+          LOW_ALL=$(go tool cover -func coverage.out \
+            | grep -v "^total:" \
+            | sed "s|${MODULE}||" \
+            | awk '{pct=$NF+0; if(pct > 0 && pct < 50) print}' \
+            | sed 's/\t\+/ /g')
+          LOW_COUNT=$(printf '%s\n' "$LOW_ALL" | grep -c . || true)
+          LOW=$(printf '%s\n' "$LOW_ALL" | head -20 | column -t)
+          if [ "$LOW_COUNT" -gt 20 ]; then
+            LOW="${LOW}$(printf '\n… and %d more' "$((LOW_COUNT - 20))")"
+          fi
+
+          BODY=$(cat <<EOF
+          ### Coverage Report — ${{ steps.test.outputs.total }}
+
+          <details>
+          <summary>Per-package breakdown</summary>
+
+          \`\`\`
+          ${PKG_REPORT}
+          \`\`\`
+
+          </details>
+
+          <details>
+          <summary>Low coverage functions (&lt; 50%)</summary>
+
+          \`\`\`
+          ${LOW:-All functions above 50% ✓}
+          \`\`\`
+
+          </details>
+          EOF
+          )
+
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq '.[] | select(.body | startswith("### Coverage Report")) | .id' | \
+            xargs -I{} gh api -X DELETE "repos/${{ github.repository }}/issues/comments/{}" 2>/dev/null || true
+          gh pr comment ${{ github.event.pull_request.number }} --body "${BODY}"
