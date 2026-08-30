@@ -13,14 +13,14 @@ on:
         type: number
         default: 0
       exclude-patterns:
-        description: Newline-separated regexes excluded from the coverage profile before gating (matched against the raw profile paths).
+        description: Newline-separated regexes excluded from the coverage profile before gating. Matched against raw `go tool cover` profile lines (`path:startLine.Col,endLine.Col numStmt count`), so patterns must not anchor to end-of-line — the filename is always followed by `:`, not EOL.
         required: false
         type: string
         default: |
-          main\.go$
-          internal/bootstrap\.go$
-          ^cmd/
-          test/mock\.go$
+          main\.go:
+          internal/bootstrap\.go:
+          /cmd/
+          test/mock\.go:
           testdata
       post-pr-comment:
         description: Post/refresh a coverage breakdown comment on the triggering PR.
