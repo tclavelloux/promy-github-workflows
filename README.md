@@ -73,3 +73,5 @@ If the caller has a `.golangci-version` file (see `promy-template-go`), the work
 ### Versioning
 
 Tag releases (`v1`, `v2`, ...) rather than pinning consumers to `@main` — a breaking change to this workflow should require an explicit opt-in bump in each caller, not a silent flip across every `promy-*` service on the next push.
+
+`v1` (and any other major alias) is a **moving major alias**, not a frozen ref: it gains additive, backward-compatible changes (new optional inputs, new default versions) without a new tag. Immutable `vX.Y.Z` tags exist alongside it for any caller that needs to freeze at an exact revision. This is deliberate: the entire value proposition of this repo — "a version bump is one PR here, not six" — requires callers to track a moving ref. If `v1` were frozen at first release, the next `golangci-lint`/coverage-tool bump would cost seven PRs (one here, plus one per caller to re-pin), not six.
