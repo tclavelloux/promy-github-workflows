@@ -1,0 +1,85 @@
+name: Go Lint
+
+on:
+  workflow_call:
+    inputs:
+      golangci-lint-version:
+        description: golangci-lint version to install (with or without a leading `v`). The single place the fleet's linter version is decided — bumping this bumps all six repos on their next CI run.
+        required: false
+        type: string
+        default: v2.13.2
+      timeout:
+        description: golangci-lint --timeout value. A Go duration string (e.g. `5m`), not a number.
+        required: false
+        type: string
+        default: 5m
+      go-version-file:
+        description: Path to the go.mod (or go.work) file used to resolve the Go toolchain version.
+        required: false
+        type: string
+        default: go.mod
+      args:
+        description: Extra one-off flags appended to `golangci-lint run`. Repo-wide linter behavior (enabled linters, exclusions, settings) belongs in the caller's own .golangci.yml, not here.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+
+      - name: Resolve golangci-lint version
+        id: version
+        env:
+          RAW_VERSION: ${{ inputs.golangci-lint-version }}
+        run: |
+          # Normalize: strip a leading 'v' if present, then re-add it consistently,
+          # so this input and .golangci-version's bare `2.13.2` are interchangeable.
+          VERSION="${RAW_VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache golangci-lint binary
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-v${{ steps.version.outputs.version }}-${{ runner.os }}
+
+      - name: Install golangci-lint
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${VERSION}"
+
+      - name: Print golangci-lint version
+        run: golangci-lint --version
+
+      - name: Check .golangci-version drift
+        if: hashFiles('.golangci-version') != ''
+        env:
+          RESOLVED_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PINNED_VERSION=$(tr -d '[:space:]' < .golangci-version)
+          PINNED_VERSION="${PINNED_VERSION#v}"
+          if [ "$PINNED_VERSION" != "$RESOLVED_VERSION" ]; then
+            echo "::warning file=.golangci-version::.golangci-version pins v${PINNED_VERSION}, but this workflow resolved v${RESOLVED_VERSION}. Local lint runs (make lint, pre-commit) may diverge from CI until .golangci-version is updated."
+          fi
+
+      - name: Run golangci-lint
+        # Interpolate inputs via env rather than directly into the shell: inputs
+        # are caller-controlled strings, and direct `${{ inputs.* }}` interpolation
+        # into `run:` is a shell-injection surface. go-coverage.yml interpolates
+        # directly elsewhere in this repo; that's a deliberate divergence here.
+        env:
+          TIMEOUT: ${{ inputs.timeout }}
+          ARGS: ${{ inputs.args }}
+        run: golangci-lint run --timeout="$TIMEOUT" $ARGS

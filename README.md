@@ -43,6 +43,35 @@ coverage:
 | `coverage-artifact` | `coverage-profile` | Name of the artifact uploaded by the caller's `test` job |
 | `profile-filename` | `coverage.raw.out` | Filename of the coverage profile inside that artifact |
 
+## `go-lint.yml`
+
+Installs a fixed `golangci-lint` version via `go install` and runs it. This is the single place the fleet's linter version is decided — bumping the `golangci-lint-version` default here is one PR, not six. Deliberately mirrors `go-coverage.yml`'s `workflow_call` shape (same input-description style, same step naming) but installs from source rather than a prebuilt binary, matching `promy-template-go/scripts/golangci-lint.sh` — so "local matches CI" is literally true, not just intended.
+
+```yaml
+jobs:
+  lint:
+    uses: tclavelloux/promy-github-workflows/.github/workflows/go-lint.yml@v1
+```
+
+A reusable workflow is called at the **job** level. It cannot be a `steps:` entry — `uses:` inside `steps:` resolves actions, not workflows.
+
+### Inputs
+
+| Input | Default | Purpose |
+|---|---|---|
+| `golangci-lint-version` | `v2.13.2` | Version to install (with or without a leading `v`) |
+| `timeout` | `5m` | `golangci-lint --timeout` value. A Go duration string, not a number. |
+| `go-version-file` | `go.mod` | Path used to resolve the Go toolchain version |
+| `args` | `""` | Extra one-off flags appended to `golangci-lint run`. Repo-wide linter behavior (enabled linters, exclusions, settings) belongs in the caller's own `.golangci.yml` — this input is for one-off flags only. |
+
+Requires only `contents: read` — unlike `go-coverage.yml`, it posts nothing and needs no `pull-requests: write`.
+
+`go-lint.yml` accepts `${{ inputs.* }}` into `run:` steps via an `env:` mapping rather than interpolating them directly into the shell string, specifically to close the shell-injection surface that direct interpolation opens (a caller-controlled `args` or `golangci-lint-version` string could otherwise break out of the intended command). `go-coverage.yml` above interpolates directly and predates this decision — that's an accepted, scoped risk there, not a pattern to copy forward.
+
+If the caller has a `.golangci-version` file (see `promy-template-go`), the workflow emits an `::warning` — never a failure — when it drifts from the resolved `golangci-lint-version`. A warning, not a hard failure, so a version bump here doesn't turn all six repos red until each lands its own PR: that would convert free propagation into six mandatory PRs.
+
 ### Versioning
 
 Tag releases (`v1`, `v2`, ...) rather than pinning consumers to `@main` — a breaking change to this workflow should require an explicit opt-in bump in each caller, not a silent flip across every `promy-*` service on the next push.
+
+`v1` (and any other major alias) is a **moving major alias**, not a frozen ref: it gains additive, backward-compatible changes (new optional inputs, new default versions) without a new tag. Immutable `vX.Y.Z` tags exist alongside it for any caller that needs to freeze at an exact revision. This is deliberate: the entire value proposition of this repo — "a version bump is one PR here, not six" — requires callers to track a moving ref. If `v1` were frozen at first release, the next `golangci-lint`/coverage-tool bump would cost seven PRs (one here, plus one per caller to re-pin), not six.
