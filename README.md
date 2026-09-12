@@ -47,7 +47,14 @@ No threshold or exclusion inputs exist. `v1` had `total-threshold`, `package-thr
 
 `.testcoverage.yml` at the caller's repo root is mandatory. The workflow fails with an explicit error if it is absent, rather than letting `go-test-coverage` fall back to a zero-threshold config and pass everything.
 
-The PR comment's per-package breakdown and low-coverage listing are built from `go-test-coverage`'s own `--breakdown-file-name` output (already exclusion-filtered by the tool) plus `go tool cover -func`, restricted to files present in that same breakdown — a plain allowlist membership check, not a second regex-exclusion engine. The low-coverage section is function-level, same as before.
+The PR comment is one sticky comment, updated in place on each push rather than deleted and reposted:
+
+- Per-package breakdown, rolled up from `go-test-coverage`'s own `--breakdown-file-name` output. Statement-weighted, so a 3-statement file does not count as much as a 300-statement one.
+- On failure only, the tool's own report: every file below threshold with its uncovered line ranges.
+
+The gate step runs with `continue-on-error` so the comment posts before the check goes red; a final step restores the failure.
+
+There is no function-level section. It required re-reading the raw, unexclusion-filtered profile with `go tool cover -func` and allowlisting it back down — the one place where the workflow still had to reconcile two different path formats. The tool's uncovered-line ranges are more actionable and cost no bespoke parsing.
 
 ## `go-lint.yml`
 
