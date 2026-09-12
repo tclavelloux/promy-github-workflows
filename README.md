@@ -68,7 +68,7 @@ A reusable workflow is called at the **job** level. It cannot be a `steps:` entr
 | `golangci-lint-version` | `v2.13.2` | Version to install (with or without a leading `v`) |
 | `timeout` | `5m` | `golangci-lint --timeout` value. A Go duration string, not a number. |
 | `go-version-file` | `go.mod` | Path used to resolve the Go toolchain version |
-| `args` | `""` | Extra one-off flags appended to `golangci-lint run`. Repo-wide linter behavior (enabled linters, exclusions, settings) belongs in the caller's own `.golangci.yml` — this input is for one-off flags only. |
+| `args` | `""` | Extra one-off flags appended to `golangci-lint run`. Repo-wide linter behavior (enabled linters, exclusions, settings) belongs in the caller's own `.golangci.yml` — this input is for one-off flags only. Flags are word-split on whitespace but not glob-expanded, so `--skip-dirs vendor/*` reaches `golangci-lint` literally instead of expanding against the runner's filesystem. |
 
 Requires only `contents: read` — unlike `go-coverage.yml`, it posts nothing and needs no `pull-requests: write`.
 
@@ -90,3 +90,9 @@ The corollary is that a semantic change must not ride a moving alias. `go-covera
 |---|---|---|
 | `go-coverage.yml` | `v2` | `v1` frozen. Migration: delete `total-threshold`, `package-threshold`, `exclude-patterns` and `module-prefix` from the caller and bump the ref. Confirm the caller's `.testcoverage.yml` already carries the intended values first — they are now the only ones that apply. |
 | `go-lint.yml` | `v1` | Unaffected by the `go-coverage.yml` major bump; the two are versioned independently per file path. |
+
+## CI
+
+`actionlint` runs on every PR (`.github/workflows/ci.yml`): it parses every workflow file and shellchecks each `run:` block. A bug here is fleet-wide, so it is the only gate before merge.
+
+Its version is pinned in `.actionlint-version`, mirroring how `.golangci-version` pins the fleet's linter.
