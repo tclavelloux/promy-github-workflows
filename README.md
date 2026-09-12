@@ -105,6 +105,27 @@ The corollary is that a semantic change must not ride a moving alias. `go-covera
 |---|---|---|
 | `go-coverage.yml` | `v2` | `v1` frozen. Migration: delete `total-threshold`, `package-threshold`, `exclude-patterns` and `module-prefix` from the caller and bump the ref. Confirm the caller's `.testcoverage.yml` already carries the intended values first — they are now the only ones that apply. |
 | `go-lint.yml` | `v1` | Unaffected by the `go-coverage.yml` major bump; the two are versioned independently per file path. |
+| `go-vuln.yml` | `v1` | New; versioned independently, same as the other two. |
+
+## `go-vuln.yml`
+
+Runs `govulncheck` over the caller's module and fails on any **called** vulnerability (one actually reachable from the caller's code, not merely present in `go.sum`). Deliberately **opt-in**: unlike `go-lint.yml`'s new formatting/tidiness gates, this is not wired into any other reusable workflow, so adopting it is a one-line job addition in each caller's own `ci.yml` rather than an instant fleet-wide gate on the next push.
+
+```yaml
+jobs:
+  vuln:
+    uses: tclavelloux/promy-github-workflows/.github/workflows/go-vuln.yml@v1
+```
+
+### Inputs
+
+| Input | Default | Purpose |
+|---|---|---|
+| `govulncheck-version` | `v1.8.0` | Version to install (with or without a leading `v`) |
+| `go-version-file` | `go.mod` | Path used to resolve the Go toolchain version |
+| `args` | `./...` | Package pattern(s)/flags passed to `govulncheck` |
+
+Requires only `contents: read` — it posts nothing and needs no `pull-requests: write`.
 
 ## CI
 
