@@ -31,9 +31,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
 
@@ -49,7 +51,7 @@ jobs:
 
       - name: Cache golangci-lint binary
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/go/bin/golangci-lint
           key: golangci-lint-v${{ steps.version.outputs.version }}-${{ runner.os }}
@@ -88,3 +90,27 @@ jobs:
           # workspace. read -ra splits on IFS without globbing.
           read -ra extra_args <<< "$ARGS"
           golangci-lint run --timeout="$TIMEOUT" "${extra_args[@]}"
+
+      # These three were previously local-only (pre-commit hooks). Anyone pushing
+      # without hooks installed bypassed them, so they now gate here too. All are
+      # additive to a moving major: they only ever start passing repos that were
+      # already clean locally, never fail a repo that wasn't already failing.
+      - name: Check formatting
+        # `golangci-lint fmt --diff` prints a diff and exits non-zero when the
+        # repo isn't formatted per its own .golangci.yml settings, and exits 0
+        # when clean — verified directly, not assumed. No extra exit-code
+        # plumbing needed: a non-zero exit here already fails the job.
+        run: golangci-lint fmt --diff
+
+      - name: Verify golangci-lint config
+        # Validates the caller's own .golangci.yml against the resolved
+        # golangci-lint version's schema. Exits non-zero on an invalid or
+        # missing config — verified directly.
+        run: golangci-lint config verify
+
+      - name: Check go.mod/go.sum tidiness
+        # `go mod tidy -diff` (Go 1.23+) prints a diff and exits non-zero when
+        # go.mod/go.sum don't match what `go mod tidy` would produce, and exits
+        # 0 when tidy — verified directly. Requires no network fetch beyond
+        # what setup-go's module resolution already needs.
+        run: go mod tidy -diff

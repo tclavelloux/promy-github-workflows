@@ -20,7 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install actionlint
         env:
@@ -36,3 +38,29 @@ jobs:
       # shellcheck is preinstalled on ubuntu-latest; actionlint shells out to it.
       - name: Lint workflows
         run: actionlint -color
+
+  # zizmor audits the same workflows for security anti-patterns actionlint doesn't
+  # check: unpinned action refs, credential persistence, template-injection, etc.
+  # Same fleet-wide blast radius as actionlint, so it gets the same treatment.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install zizmor
+        env:
+          # Pinned in .zizmor-version, mirroring .actionlint-version. Installed
+          # from the released binary (not `uvx zizmor`) so this job needs no
+          # Python/uv toolchain — same reasoning as actionlint's own install step.
+          ZIZMOR_VERSION_FILE: .zizmor-version
+        run: |
+          version="$(tr -d '[:space:]' < "$ZIZMOR_VERSION_FILE")"
+          url="https://github.com/zizmorcore/zizmor/releases/download/v${version}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL "$url" | tar -xz -C /usr/local/bin zizmor
+          zizmor --version
+
+      - name: Audit workflows
+        run: zizmor --persona=regular .github/workflows/

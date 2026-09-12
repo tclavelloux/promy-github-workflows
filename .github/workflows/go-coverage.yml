@@ -32,7 +32,9 @@ jobs:
       # (github.repository / github.sha of the triggering event), never to
       # promy-github-workflows itself. This is what makes the caller's .testcoverage.yml
       # and go.mod available below.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # No actions/setup-go: go-test-coverage runs as a docker action and the module
       # prefix is parsed straight out of go.mod, so this job needs no Go toolchain.
@@ -57,7 +59,7 @@ jobs:
           fi
           echo "prefix=${prefix}/" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ${{ inputs.coverage-artifact }}
 
@@ -75,7 +77,7 @@ jobs:
         # Deliberately non-fatal here: a failing gate is exactly when the PR comment
         # is most useful, so post it first and re-fail in the last step.
         continue-on-error: true
-        uses: vladopajic/go-test-coverage@v2
+        uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
         with:
           config: ./.testcoverage.yml
           profile: ${{ inputs.profile-filename }}

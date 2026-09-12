@@ -79,6 +79,14 @@ A reusable workflow is called at the **job** level. It cannot be a `steps:` entr
 
 Requires only `contents: read` — unlike `go-coverage.yml`, it posts nothing and needs no `pull-requests: write`.
 
+Beyond `golangci-lint run`, the job also blocks on three gates that previously only ran as local pre-commit hooks (so pushing without hooks installed bypassed them):
+
+- `golangci-lint fmt --diff` — fails if the caller isn't formatted per its own `.golangci.yml`.
+- `golangci-lint config verify` — fails if the caller's `.golangci.yml` doesn't validate against the resolved `golangci-lint` version's schema.
+- `go mod tidy -diff` — fails if `go.mod`/`go.sum` don't match what `go mod tidy` would produce. Requires Go 1.23+.
+
+All three print a diff and exit non-zero on drift, exit 0 clean — verified directly against `golangci-lint v2.13.2` and `go1.26`, not assumed.
+
 `go-lint.yml` accepts `${{ inputs.* }}` into `run:` steps via an `env:` mapping rather than interpolating them directly into the shell string, specifically to close the shell-injection surface that direct interpolation opens (a caller-controlled `args` or `golangci-lint-version` string could otherwise break out of the intended command). `go-coverage.yml` now follows the same convention throughout.
 
 If the caller has a `.golangci-version` file (see `promy-template-go`), the workflow emits an `::warning` — never a failure — when it drifts from the resolved `golangci-lint-version`. A warning, not a hard failure, so a version bump here doesn't turn all six repos red until each lands its own PR: that would convert free propagation into six mandatory PRs.
@@ -100,6 +108,13 @@ The corollary is that a semantic change must not ride a moving alias. `go-covera
 
 ## CI
 
-`actionlint` runs on every PR (`.github/workflows/ci.yml`): it parses every workflow file and shellchecks each `run:` block. A bug here is fleet-wide, so it is the only gate before merge.
+`actionlint` and `zizmor` run on every PR (`.github/workflows/ci.yml`), both blocking. A bug here is fleet-wide, so these are the only gates before merge.
 
-Its version is pinned in `.actionlint-version`, mirroring how `.golangci-version` pins the fleet's linter.
+- `actionlint` parses every workflow file and shellchecks each `run:` block. Version pinned in `.actionlint-version`.
+- `zizmor` audits the same workflows for security anti-patterns actionlint doesn't check — unpinned action refs, credential persistence, template injection. Version pinned in `.zizmor-version`, mirroring `.actionlint-version`. Installed from zizmor's released binary rather than `uvx zizmor`, so the job needs no Python/uv toolchain — same reasoning as the actionlint install step.
+
+### Action-pinning policy
+
+Every `uses:` in this repo's own workflows is pinned to a full commit SHA with a trailing version comment (`actions/checkout@<sha> # v4.4.0`), not to a mutable tag. `vladopajic/go-test-coverage@v2` matters most: it is the only third-party action, it runs in a job holding `pull-requests: write`, and a mutable major tag is one its maintainer can repoint underneath every caller with no review on this side.
+
+Dependabot (`.github/dependabot.yml`, `github-actions` ecosystem, weekly) is what keeps these pins from going stale — pinning without Dependabot just freezes the fleet on old actions. Each Dependabot PR bumps one SHA and its version comment; it does not change the moving major aliases (`v1`, `v2`) that callers track.
