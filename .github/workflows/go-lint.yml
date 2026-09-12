@@ -77,9 +77,14 @@ jobs:
       - name: Run golangci-lint
         # Interpolate inputs via env rather than directly into the shell: inputs
         # are caller-controlled strings, and direct `${{ inputs.* }}` interpolation
-        # into `run:` is a shell-injection surface. go-coverage.yml interpolates
-        # directly elsewhere in this repo; that's a deliberate divergence here.
+        # into `run:` is a shell-injection surface. go-coverage.yml follows the
+        # same convention.
         env:
           TIMEOUT: ${{ inputs.timeout }}
           ARGS: ${{ inputs.args }}
-        run: golangci-lint run --timeout="$TIMEOUT" $ARGS
+        run: |
+          # `args` is intentionally word-split into separate flags, but a bare
+          # $ARGS would also glob: `--skip-dirs *` would expand against the
+          # workspace. read -ra splits on IFS without globbing.
+          read -ra extra_args <<< "$ARGS"
+          golangci-lint run --timeout="$TIMEOUT" "${extra_args[@]}"

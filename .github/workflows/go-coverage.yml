@@ -3,35 +3,11 @@ name: Go Coverage Gate
 on:
   workflow_call:
     inputs:
-      total-threshold:
-        description: Fail the build if total coverage drops below this percentage.
-        required: true
-        type: number
-      package-threshold:
-        description: Fail the build if any package's coverage drops below this percentage. 0 disables the check.
-        required: false
-        type: number
-        default: 0
-      exclude-patterns:
-        description: Newline-separated regexes excluded from the coverage profile before gating. Matched against raw `go tool cover` profile lines (`path:startLine.Col,endLine.Col numStmt count`), so patterns must not anchor to end-of-line — the filename is always followed by `:`, not EOL.
-        required: false
-        type: string
-        default: |
-          main\.go:
-          internal/bootstrap\.go:
-          /cmd/
-          test/mock\.go:
-          testdata
       post-pr-comment:
         description: Post/refresh a coverage breakdown comment on the triggering PR.
         required: false
         type: boolean
         default: true
-      module-prefix:
-        description: Go module prefix stripped from paths in the PR comment, e.g. github.com/org/repo/.
-        required: false
-        type: string
-        default: ""
       coverage-artifact:
         description: Name of the artifact (uploaded by the caller's test job) containing the raw `go test -coverprofile` output. The caller is responsible for running tests with whatever services (databases, Redis, ...) they need — this workflow only gates and reports on the resulting profile.
         required: false
@@ -51,75 +27,123 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
+      # Reusable workflows execute in the context of the run that called them: with no
+      # `repository`/`ref` input, actions/checkout resolves to the CALLING repo and ref
+      # (github.repository / github.sha of the triggering event), never to
+      # promy-github-workflows itself. This is what makes the caller's .testcoverage.yml
+      # and go.mod available below.
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      # No actions/setup-go: go-test-coverage runs as a docker action and the module
+      # prefix is parsed straight out of go.mod, so this job needs no Go toolchain.
+
+      # .testcoverage.yml is mandatory, not optional: it is the only source of
+      # thresholds and exclusions. Fail loudly rather than let go-test-coverage
+      # fall back to a zero-threshold config and pass everything.
+      - name: Require .testcoverage.yml
+        run: |
+          if [ ! -f .testcoverage.yml ]; then
+            echo "::error::.testcoverage.yml not found at the repo root. It is the single source of truth for coverage thresholds and exclusions — this workflow will not gate without it."
+            exit 1
+          fi
+
+      - name: Derive module prefix from go.mod
+        id: module
+        run: |
+          prefix="$(awk '/^module /{print $2; exit}' go.mod)"
+          if [ -z "$prefix" ]; then
+            echo "::error::no module line found in go.mod"
+            exit 1
+          fi
+          echo "prefix=${prefix}/" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.coverage-artifact }}
 
-      - name: Filter coverage profile
-        id: test
-        run: |
-          EXCLUDE_ARGS=()
-          while IFS= read -r pattern; do
-            [ -n "$pattern" ] && EXCLUDE_ARGS+=(-e "$pattern")
-          done <<< "${{ inputs.exclude-patterns }}"
-
-          if [ "${#EXCLUDE_ARGS[@]}" -gt 0 ]; then
-            grep -Ev "${EXCLUDE_ARGS[@]}" "${{ inputs.profile-filename }}" > coverage.out
-          else
-            cp "${{ inputs.profile-filename }}" coverage.out
-          fi
-
-          echo "total=$(go tool cover -func coverage.out | grep total: | awk '{print $3}')" >> "$GITHUB_OUTPUT"
-
-      - name: Write coverage config
-        run: |
-          cat > .testcoverage.ci.yml <<EOF
-          profile: coverage.out
-          threshold:
-            file: 0
-            package: ${{ inputs.package-threshold }}
-            total: ${{ inputs.total-threshold }}
-          EOF
-
+      # go-test-coverage reads exclusions and thresholds from the caller's own
+      # .testcoverage.yml (already checked out above) — the same file the caller's
+      # pre-push hook reads. This is the only place regex exclusions are applied;
+      # nothing here re-implements or re-filters the profile. `profile:` overrides the
+      # config's own `profile:` key, since the artifact is downloaded under
+      # `profile-filename`, not under whatever name the caller's config declares.
+      # No `threshold-*` inputs are passed. Every one of them overrides the config
+      # file when set, which is precisely the duplication this workflow exists to
+      # remove — .testcoverage.yml decides, and nothing here can contradict it.
       - name: Enforce coverage thresholds
+        id: coverage
+        # Deliberately non-fatal here: a failing gate is exactly when the PR comment
+        # is most useful, so post it first and re-fail in the last step.
+        continue-on-error: true
         uses: vladopajic/go-test-coverage@v2
         with:
-          config: ./.testcoverage.ci.yml
+          config: ./.testcoverage.yml
+          profile: ${{ inputs.profile-filename }}
+          breakdown-file-name: coverage-breakdown.txt
 
       - name: Add coverage comment
         if: inputs.post-pr-comment && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODULE_PREFIX: ${{ steps.module.outputs.prefix }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BREAKDOWN_FILE: coverage-breakdown.txt
+          # JSON-encoded string. Decoded with jq rather than expression-level
+          # fromJSON(), which errors the whole step if the output is ever empty.
+          REPORT_JSON: ${{ steps.coverage.outputs.report }}
+          GATE_OUTCOME: ${{ steps.coverage.outcome }}
         run: |
-          MODULE="${{ inputs.module-prefix }}"
+          # coverage-breakdown.txt (`name;total;covered`, one line per FILE) is written
+          # by go-test-coverage itself, from the same excluded/gated file set used for
+          # the threshold check above. Everything below is a rollup of that file — no
+          # exclusion logic is re-implemented, and the raw profile is never re-read.
+          TOTAL_PCT=$(awk -F';' '{t+=$2; c+=$3} END {printf "%.1f", (t>0 ? c/t*100 : 0)}' "$BREAKDOWN_FILE")
 
-          PKG_REPORT=$(go tool cover -func coverage.out \
-            | grep -v "^total:" \
-            | sed "s|${MODULE}||" \
-            | awk -F: '{split($0,a,"\t"); pkg=$1; sub(/\/[^/]*$/, "", pkg); cov=a[length(a)]} {seen[pkg]++; sum[pkg]+=cov+0} END {for(p in seen) printf "%s %s\n", p, sprintf("%.1f%%", sum[p]/seen[p])}' \
+          # go-test-coverage v2.19.0 emits breakdown names already relative to the
+          # module (`db/seeds/foo.go`), so this strip is a no-op today — kept as a
+          # guard in case a future version emits full import paths. substr(), not a
+          # regex sub(), so the dots in a module path cannot partially match.
+          PKG_REPORT=$(awk -F';' '{
+              file=$1; pfx=ENVIRON["MODULE_PREFIX"]
+              if (substr(file, 1, length(pfx)) == pfx) file = substr(file, length(pfx) + 1)
+              # Escape the / inside the bracket expression. gawk tolerates a bare
+              # [^/] inside a /.../ literal; mawk (the /usr/bin/awk on ubuntu-latest)
+              # and BSD awk reject it as a nonterminated character class.
+              # No apostrophes in this comment: it sits inside a single-quoted
+              # awk program, so one would terminate the shell string.
+              pkg=file; sub(/\/[^\/]*$/, "", pkg)
+              total[pkg]+=$2; covered[pkg]+=$3
+            } END {
+              for (p in total) {
+                pct = (total[p] > 0) ? covered[p]/total[p]*100 : 0
+                printf "%s %.1f%%\n", p, pct
+              }
+            }' "$BREAKDOWN_FILE" \
             | sort -t' ' -k2 -n \
             | column -t)
 
-          LOW_ALL=$(go tool cover -func coverage.out \
-            | grep -v "^total:" \
-            | sed "s|${MODULE}||" \
-            | awk '{pct=$NF+0; if(pct > 0 && pct < 50) print}' \
-            | sed 's/\t\+/ /g')
-          LOW_COUNT=$(printf '%s\n' "$LOW_ALL" | grep -c . || true)
-          LOW=$(printf '%s\n' "$LOW_ALL" | head -20 | column -t)
-          if [ "$LOW_COUNT" -gt 20 ]; then
-            LOW="${LOW}$(printf '\n… and %d more' "$((LOW_COUNT - 20))")"
+          # On failure go-test-coverage reports every file below threshold with its
+          # uncovered line ranges — strictly more actionable than a standing list of
+          # low-coverage functions, and it costs no bespoke parsing.
+          GATE_REPORT=$(printf '%s' "$REPORT_JSON" | jq -r . 2>/dev/null || true)
+
+          if [ "$GATE_OUTCOME" = "failure" ]; then
+            STATUS="❌ below threshold"
+            DETAIL=$(printf "**Uncovered lines**\n\n\`\`\`\n%s\n\`\`\`\n" "${GATE_REPORT:-no report emitted}")
+          else
+            STATUS="✅ threshold satisfied"
+            DETAIL=""
           fi
 
-          BODY=$(cat <<EOF
-          ### Coverage Report — ${{ steps.test.outputs.total }}
+          # Hidden marker identifies this workflow's own comment on re-runs.
+          MARKER='<!-- promy-coverage-report -->'
 
+          BODY=$(cat <<EOF
+          $MARKER
+          ### Coverage Report — ${TOTAL_PCT}% ${STATUS}
+
+          ${DETAIL}
           <details>
           <summary>Per-package breakdown</summary>
 
@@ -128,19 +152,23 @@ jobs:
           \`\`\`
 
           </details>
-
-          <details>
-          <summary>Low coverage functions (&lt; 50%)</summary>
-
-          \`\`\`
-          ${LOW:-All functions above 50% ✓}
-          \`\`\`
-
-          </details>
           EOF
           )
 
-          gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --jq '.[] | select(.body | startswith("### Coverage Report")) | .id' | \
-            xargs -I{} gh api -X DELETE "repos/${{ github.repository }}/issues/comments/{}" 2>/dev/null || true
-          gh pr comment ${{ github.event.pull_request.number }} --body "${BODY}"
+          # Update one sticky comment rather than delete-and-repost: no notification
+          # churn on every push, and the permalink stays stable across the PR.
+          EXISTING=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"$MARKER\")) | .id] | first // empty" | head -n1)
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${EXISTING}" -f body="${BODY}" >/dev/null
+          else
+            gh pr comment "${PR_NUMBER}" --body "${BODY}"
+          fi
+
+      # continue-on-error above swallowed the gate result so the comment could post.
+      # Restore it: this is the step that actually turns the check red.
+      - name: Fail if coverage gate failed
+        if: steps.coverage.outcome == 'failure'
+        run: |
+          echo "::error::coverage below the threshold in .testcoverage.yml — see the coverage comment on this PR"
+          exit 1

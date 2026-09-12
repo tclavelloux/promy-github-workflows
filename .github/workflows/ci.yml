@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # This repo ships workflows to six services, so a bug here is a fleet-wide bug.
+  # actionlint parses every workflow and runs shellcheck over each `run:` block —
+  # it catches the two classes that have already bitten us: an apostrophe inside a
+  # single-quoted awk program, and expression/type errors in `uses:` inputs.
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install actionlint
+        env:
+          # Pinned in .actionlint-version so the version lives in one place,
+          # mirroring how .golangci-version pins the fleet's linter.
+          ACTIONLINT_VERSION_FILE: .actionlint-version
+        run: |
+          version="$(tr -d '[:space:]' < "$ACTIONLINT_VERSION_FILE")"
+          url="https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz"
+          curl -fsSL "$url" | tar -xz -C /usr/local/bin actionlint
+          actionlint --version
+
+      # shellcheck is preinstalled on ubuntu-latest; actionlint shells out to it.
+      - name: Lint workflows
+        run: actionlint -color
