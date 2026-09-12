@@ -1,0 +1,74 @@
+name: Go Vulnerability Check
+
+on:
+  workflow_call:
+    inputs:
+      govulncheck-version:
+        description: govulncheck version to install (with or without a leading `v`). The single place the fleet's vuln-scanner version is decided.
+        required: false
+        type: string
+        default: v1.8.0
+      go-version-file:
+        description: Path to the go.mod (or go.work) file used to resolve the Go toolchain version.
+        required: false
+        type: string
+        default: go.mod
+      args:
+        description: Extra one-off flags/patterns appended to `govulncheck` (e.g. a narrower package pattern than `./...`).
+        required: false
+        type: string
+        default: ./...
+
+permissions:
+  contents: read
+
+jobs:
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+
+      - name: Resolve govulncheck version
+        id: version
+        env:
+          RAW_VERSION: ${{ inputs.govulncheck-version }}
+        run: |
+          # Normalize: strip a leading 'v' if present, then re-add it consistently,
+          # mirroring go-lint.yml's own golangci-lint-version handling.
+          VERSION="${RAW_VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache govulncheck binary
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-v${{ steps.version.outputs.version }}-${{ runner.os }}
+
+      - name: Install govulncheck
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: go install "golang.org/x/vuln/cmd/govulncheck@v${VERSION}"
+
+      - name: Print govulncheck version
+        run: govulncheck -version
+
+      - name: Run govulncheck
+        # Interpolate inputs via env rather than directly into the shell: inputs
+        # are caller-controlled strings, and direct `${{ inputs.* }}` interpolation
+        # into `run:` is a shell-injection surface. Same convention as go-lint.yml
+        # and go-coverage.yml.
+        env:
+          ARGS: ${{ inputs.args }}
+        run: |
+          # `args` is intentionally word-split into separate flags/patterns, but a
+          # bare $ARGS would also glob. read -ra splits on IFS without globbing.
+          read -ra extra_args <<< "$ARGS"
+          govulncheck "${extra_args[@]}"
