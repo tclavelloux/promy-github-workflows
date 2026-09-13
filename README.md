@@ -116,6 +116,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-coverage.yml` | `go-coverage/v2` | `go-coverage/v1` frozen. Migration: delete `total-threshold`, `package-threshold`, `exclude-patterns` and `module-prefix` from the caller and bump the ref. Confirm the caller's `.testcoverage.yml` already carries the intended values first — they are now the only ones that apply. |
 | `go-lint.yml` | `go-lint/v1` | Own tag namespace; unaffected by the `go-coverage.yml` major bump. |
 | `go-vuln.yml` | `go-vuln/v1` | New; own tag namespace, same as the other two. |
+| `go-docker.yml` | `go-docker/v1` | Tag not cut yet — reference `@main` only for validation until it exists. |
 
 ## `go-vuln.yml`
 
@@ -149,3 +150,47 @@ Requires only `contents: read` — it posts nothing and needs no `pull-requests:
 Every `uses:` in this repo's own workflows is pinned to a full commit SHA with a trailing version comment (`actions/checkout@<sha> # v4.4.0`), not to a mutable tag. `vladopajic/go-test-coverage@v2` matters most: it is the only third-party action, it runs in a job holding `pull-requests: write`, and a mutable major tag is one its maintainer can repoint underneath every caller with no review on this side.
 
 Dependabot (`.github/dependabot.yml`, `github-actions` ecosystem, weekly) is what keeps these pins from going stale — pinning without Dependabot just freezes the fleet on old actions. Each Dependabot PR bumps one SHA and its version comment; it does not touch the per-workflow moving major tags (`go-lint/v1`, `go-coverage/v2`, `go-vuln/v1`) that callers track — those are managed by hand, per the Versioning section above.
+
+## `go-docker.yml`
+
+Catches Dockerfile/`go.mod` drift, then proves the image still builds. Opt-in, one job per caller.
+
+`promy-crm` bumped its `go` directive to 1.26.8 while its Dockerfile still said `golang:1.24`. CI was green — no job in any repo built the image — and the Railway deployment failed. `promy-template-go` shipped a 1.25 module on a `golang:1.23` image for months for the same reason.
+
+```yaml
+jobs:
+  docker:
+    uses: tclavelloux/promy-github-workflows/.github/workflows/go-docker.yml@go-docker/v1
+```
+
+`promy-event-bus` is a library with no Dockerfile and does not adopt this.
+
+### What it checks
+
+**1. Consistency gate.** Compares each Dockerfile's `golang:` base-image minor against the `go` directive in `go.mod`. Static, no network, about a second. Patch levels are ignored — `golang:1.26` against `go 1.26.8` passes, because the `golang` image publishes X.Y tags.
+
+Per case:
+
+| Case | Result | Why |
+|---|---|---|
+| Base minor ≠ `go` directive minor | **fail** | The drift this workflow exists to catch |
+| No `golang:` line in the file | **pass**, `::notice` | Pulls no Go toolchain, so nothing can drift. Multistage final stages (`gcr.io/distroless/base-debian10`) are exactly this |
+| Several `golang:` lines in one file | **every one is checked** | A multistage build can carry more than one Go stage; checking only the first lets a later stage drift undetected |
+| Listed file does not exist | **fail** | Skipping it would let a renamed or deleted Dockerfile turn the gate into a silent no-op. Set `dockerfiles` to the files the repo actually ships |
+| `golang:latest` or any tag with no X.Y | **fail** | Unparseable, therefore uncheckable — pin a concrete minor |
+
+**2. `docker build`, no push.** Builds each Dockerfile to prove it compiles. Secondary to the gate, and skippable via `build: false`.
+
+### Inputs
+
+| Input | Default | Purpose |
+|---|---|---|
+| `dockerfiles` | `Dockerfile dev.Dockerfile` | Space-separated paths to check and build. Every listed file must exist |
+| `build` | `true` | Run `docker build` after the gate. `false` keeps the gate alone |
+| `go-version-file` | `go.mod` | Path whose `go` directive the base images are compared against |
+
+Requires only `contents: read` — it pushes nothing and posts nothing.
+
+### Railway parity is unverified
+
+A GitHub-hosted runner can succeed where Railway fails. If Railway restricts egress to `proxy.golang.org`, it cannot auto-download a newer toolchain, so a `golang:1.24` image building a `go 1.26.8` module breaks there and not here. That asymmetry is why the static gate is the primary check and the build is secondary — the gate fails on the mismatch regardless of whether any builder tolerates it.
