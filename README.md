@@ -197,12 +197,20 @@ on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
 
+permissions:
+  contents: read
+
 jobs:
   pr-title:
+    permissions:
+      contents: read
+      pull-requests: read
     uses: tclavelloux/promy-github-workflows/.github/workflows/pr-title.yml@pr-title/v1
 ```
 
-Copy the trigger block verbatim. Two parts of it are load-bearing:
+Copy the block verbatim. Three parts of it are load-bearing:
+
+- **`permissions:` on the calling job is mandatory.** The `promy-*` repos set their default workflow token to *read repository contents and packages* — which is `pull-requests: none`. A called workflow can only narrow the caller's token, never widen it, so a caller that omits the job-level grant does not fail the job: the run never starts. It reports `startup_failure` with no jobs and no log, which reads like an infrastructure blip rather than a config error. Verified against `promy-template-go`: identical caller, `startup_failure` without the block, green with it. `go-coverage.yml`'s caller carries the same block for the same reason.
 
 - **`edited` is mandatory.** GitHub's default `pull_request` types are `opened`, `synchronize`, `reopened` — a title change fires none of them. Without `edited`, the check goes red on a bad title and stays red forever, because fixing the title dispatches no run. Verified: an edit-only title fix with `edited` present dispatched a new run and flipped the check green.
 - **`pull_request`, not `pull_request_target`.** `promy-frontend` uses `pull_request_target`; that is only required to hand a fork PR a token with write scope or repo secrets. This workflow holds `pull-requests: read`, posts nothing, and checks nothing out. The `promy-*` repos are private and single-maintainer, so fork PRs do not occur — and `pull_request_target` runs the base-branch workflow with an elevated token against untrusted head content, which is the pattern zizmor exists to flag. `pull_request` is strictly the safer ref for the same result.
