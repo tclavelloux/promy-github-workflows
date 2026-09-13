@@ -118,6 +118,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-vuln.yml` | `go-vuln/v1` | New; own tag namespace, same as the other two. |
 | `go-docker.yml` | `go-docker/v1` | Own tag namespace, same as the others. Immutable `go-docker/v1.0.0` alongside. |
 | `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
+| `.pre-commit-hooks.yaml` | `hooks/v1` | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. |
 
 ## `go-vuln.yml`
 
@@ -231,6 +232,56 @@ A reusable workflow is callable from either trigger — `workflow_call` constrai
 Every default matches what `promy-frontend`'s standalone `enforce-conventional-pr-title.yml` already enforces, so adopting this needs no `with:` block.
 
 Requires only `pull-requests: read` — it reads the title off the event payload and reports a check run. It posts no comment and performs no checkout.
+
+## Shared pre-commit hooks
+
+`.pre-commit-hooks.yaml` at the repo root makes this repo a pre-commit **remote hook repository**, alongside its reusable workflows. Callers add it to their own `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/tclavelloux/promy-github-workflows
+    rev: hooks/v1
+    hooks:
+      - id: no-direct-commit-to-main
+```
+
+The repo is public, so pre-commit clones it over anonymous HTTPS — no token, no SSH key, no credential helper. Hooks resolve on a fresh machine and in CI.
+
+Hooks live under `hooks/`. All of them share the `hooks/vX` tag namespace: pre-commit resolves one `rev` for the whole repository, so a per-hook namespace would be unusable.
+
+### `no-direct-commit-to-main`
+
+Fails the commit when `HEAD` is on a protected branch — `main` by default.
+
+```
+Direct commits to 'main' are blocked. Create a feature branch instead.
+```
+
+| Field | Value | Why |
+|---|---|---|
+| `language` | `script` | The entry is a file shipped in this repo and executed directly through its `#!/bin/sh` shebang. `language: system` would require the interpreter to be resolvable on the caller's `PATH` and the script to already exist there — `script` ships the implementation with the hook |
+| `stages` | `[pre-commit]` | The only stage where blocking is meaningful. Without it, pre-commit registers the hook at every stage the caller installs, so a `pre-push` or `commit-msg` install would re-run the same branch check and fail a push that has nothing to do with committing |
+| `always_run` | `true` | Triggers on branch state, not on file contents. Without it the hook is skipped whenever no staged file matches |
+| `pass_filenames` | `false` | Reads `git symbolic-ref`, not the staged paths. Without it every staged path is appended to the command line, where the script would read them as protected-branch names |
+
+Detached `HEAD` **fails** rather than passing. `git rev-parse --abbrev-ref HEAD` returns the literal string `HEAD` when detached, so a naive `[ "$branch" = "main" ]` silently allows the commit. The script uses `git symbolic-ref --quiet --short HEAD`, which exits non-zero instead.
+
+The protected branch is configurable through `args:`, taking one or more branch names:
+
+```yaml
+      - id: no-direct-commit-to-main
+        args: [main, release]
+```
+
+Every `promy-*` repo uses `main` today, so the default covers all six. The argument exists because a branch name baked into a shared hook is a value six callers cannot override without forking the hook — the exact coupling this repo removes elsewhere.
+
+### Why it is centralised
+
+- `main` cannot be protected server-side. `gh api repos/tclavelloux/<repo>/branches/main/protection` returns `403 Upgrade to GitHub Pro` — the `promy-*` repos are private on a free plan. This hook is the only control that exists, not a local mirror of a GitHub rule.
+- A `local` hook duplicated across six `.pre-commit-config.yaml` files is one policy in six places, free to drift. Same failure mode as the per-caller workflow inputs `go-coverage/v2` removed.
+- It cannot live in `.githooks/`. `core.hooksPath` does not survive a clone (it is written to `.git/config`), and `pre-commit install` refuses outright while it is set: `Cowardly refusing to install hooks with core.hooksPath set`. The two mechanisms are mutually exclusive; the fleet standardises on pre-commit.
+
+A hook is not a substitute for a server-side rule — it runs only where it is installed, and `--no-verify` bypasses it. It is the strongest control available on this plan, not a strong one.
 
 ## CI
 
