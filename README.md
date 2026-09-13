@@ -116,7 +116,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-coverage.yml` | `go-coverage/v2` | `go-coverage/v1` frozen. Migration: delete `total-threshold`, `package-threshold`, `exclude-patterns` and `module-prefix` from the caller and bump the ref. Confirm the caller's `.testcoverage.yml` already carries the intended values first — they are now the only ones that apply. |
 | `go-lint.yml` | `go-lint/v1` | Own tag namespace; unaffected by the `go-coverage.yml` major bump. |
 | `go-vuln.yml` | `go-vuln/v1` | New; own tag namespace, same as the other two. |
-| `go-docker.yml` | `go-docker/v1` | Tag not cut yet — reference `@main` only for validation until it exists. |
+| `go-docker.yml` | `go-docker/v1` | Own tag namespace, same as the others. Immutable `go-docker/v1.0.0` alongside. |
 
 ## `go-vuln.yml`
 
