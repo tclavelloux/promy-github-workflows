@@ -1,0 +1,121 @@
+name: Go Docker
+
+on:
+  workflow_call:
+    inputs:
+      dockerfiles:
+        description: Space-separated list of Dockerfiles to check and build. Every listed file must exist — a missing file fails the job rather than being skipped, so a renamed or deleted Dockerfile cannot silently turn this gate into a no-op. Override the default in a repo that ships only one of them.
+        required: false
+        type: string
+        default: Dockerfile dev.Dockerfile
+      build:
+        description: Run `docker build` on each Dockerfile after the consistency gate. Set false to keep the static gate (about a second, no network) without paying for the build.
+        required: false
+        type: boolean
+        default: true
+      go-version-file:
+        description: Path to the go.mod (or go.work) file whose `go` directive the Dockerfile base images are compared against.
+        required: false
+        type: string
+        default: go.mod
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No actions/setup-go: the gate parses the `go` directive out of go.mod
+      # textually, so it needs no Go toolchain — same reasoning as go-coverage.yml.
+      - name: Check Dockerfile base images against go.mod
+        # Interpolate inputs via env rather than directly into the shell: inputs
+        # are caller-controlled strings, and direct `${{ inputs.* }}` interpolation
+        # into `run:` is a shell-injection surface. Same convention as go-lint.yml,
+        # go-vuln.yml and go-coverage.yml.
+        env:
+          DOCKERFILES: ${{ inputs.dockerfiles }}
+          GO_VERSION_FILE: ${{ inputs.go-version-file }}
+        run: |
+          set -euo pipefail
+
+          # `dockerfiles` is intentionally word-split into separate paths, but a
+          # bare $DOCKERFILES would also glob. read -ra splits on IFS without globbing.
+          read -ra files <<< "$DOCKERFILES"
+
+          if [ ! -f "$GO_VERSION_FILE" ]; then
+            echo "::error::${GO_VERSION_FILE} not found — nothing to compare the Dockerfile base images against."
+            exit 1
+          fi
+
+          # Minor only (1.26 from `go 1.26.8`): the golang image publishes X.Y tags,
+          # and a patch-level mismatch is not drift worth failing on.
+          go_directive="$(awk '/^go /{print $2; exit}' "$GO_VERSION_FILE")"
+          if [ -z "$go_directive" ]; then
+            echo "::error file=${GO_VERSION_FILE}::no 'go' directive found."
+            exit 1
+          fi
+          mod="$(printf '%s' "$go_directive" | cut -d. -f1,2)"
+          echo "${GO_VERSION_FILE} declares go ${go_directive} (minor ${mod})"
+
+          status=0
+          for f in "${files[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::${f} is listed in the dockerfiles input but does not exist. Set the dockerfiles input to the files this repo actually ships."
+              status=1
+              continue
+            fi
+
+            # Every golang: reference, not just the first. A multistage build can
+            # carry more than one Go stage, and checking only the first one lets a
+            # second stage drift undetected.
+            refs=()
+            while IFS= read -r ref; do
+              if [ -n "$ref" ]; then refs+=("$ref"); fi
+            done < <(grep -oE 'golang:[A-Za-z0-9._-]+' "$f" || true)
+
+            if [ "${#refs[@]}" -eq 0 ]; then
+              # Not a failure: a Dockerfile with no golang: base pulls no Go
+              # toolchain, so it has nothing to drift from go.mod. Multistage final
+              # stages (gcr.io/distroless/base-debian10) are exactly this case.
+              echo "::notice file=${f}::no golang: base image — nothing to compare."
+              continue
+            fi
+
+            for ref in "${refs[@]}"; do
+              tag="${ref#golang:}"
+              img="$(printf '%s' "$tag" | grep -oE '^[0-9]+\.[0-9]+' || true)"
+              if [ -z "$img" ]; then
+                echo "::error file=${f}::${f} uses golang:${tag}, which carries no X.Y version. Pin a concrete minor (golang:${mod}) so this gate can compare it."
+                status=1
+                continue
+              fi
+              if [ "$img" != "$mod" ]; then
+                echo "::error file=${f}::${f} uses golang:${img} but ${GO_VERSION_FILE} declares go ${mod}"
+                status=1
+              else
+                echo "${f}: golang:${tag} matches go ${mod}"
+              fi
+            done
+          done
+
+          exit "$status"
+
+      - name: Build images
+        if: inputs.build
+        env:
+          DOCKERFILES: ${{ inputs.dockerfiles }}
+        run: |
+          set -euo pipefail
+          read -ra files <<< "$DOCKERFILES"
+          i=0
+          for f in "${files[@]}"; do
+            i=$((i + 1))
+            echo "::group::docker build --file ${f}"
+            docker build --file "$f" --tag "promy-ci-build:${i}" .
+            echo "::endgroup::"
+          done
