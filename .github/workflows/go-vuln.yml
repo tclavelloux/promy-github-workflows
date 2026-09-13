@@ -55,6 +55,11 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          # setup-go v7 defaults GOTOOLCHAIN to `local`, which makes `go install`
+          # refuse any tool whose go.mod requires a newer Go than the caller's.
+          # v5.6.0 defaulted to `auto`; restore that explicitly rather than
+          # inherit whatever the action decides next.
+          GOTOOLCHAIN: auto
         run: go install "golang.org/x/vuln/cmd/govulncheck@v${VERSION}"
 
       - name: Print govulncheck version
