@@ -91,6 +91,26 @@ All three print a diff and exit non-zero on drift, exit 0 clean — verified dir
 
 If the caller has a `.golangci-version` file (see `promy-template-go`), the workflow emits an `::warning` — never a failure — when it drifts from the resolved `golangci-lint-version`. A warning, not a hard failure, so a version bump here doesn't turn all six repos red until each lands its own PR: that would convert free propagation into six mandatory PRs.
 
+### pre-commit consumers pin immutably — the opposite of workflow consumers
+
+Workflows and pre-commit hooks resolve refs differently, so they take opposite conventions:
+
+| | resolution | correct ref |
+|---|---|---|
+| `uses:` in a workflow | re-resolved **every run** | moving major alias (`go-lint/v1`) |
+| `rev:` in `.pre-commit-config.yaml` | resolved **once**, then cached in `~/.cache/pre-commit` and never re-resolved | immutable tag (`hooks/v1.0.0`) |
+
+Point a caller at the moving `hooks/v1` and pre-commit warns on every invocation:
+
+```
+[WARNING] The 'rev' field ... appears to be a mutable reference (moving tag / branch).
+Mutable references are never updated after first install and are not supported.
+```
+
+It means what it says. Once a developer's cache has resolved `hooks/v1`, moving the tag ships them nothing — they stay on the old script permanently, with no signal. The moving-alias convention that makes workflow bumps free is actively harmful here.
+
+So: cut `hooks/vX.Y.Z` for every hook change, and let callers pick it up with `pre-commit autoupdate`. The `hooks/v1` alias exists for symmetry with the workflow tags but should not appear in a `rev:`.
+
 ### Versioning
 
 Tag releases rather than pinning consumers to `@main` — a breaking change to a workflow should require an explicit opt-in bump in each caller, not a silent flip across every `promy-*` service on the next push.
@@ -118,7 +138,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-vuln.yml` | `go-vuln/v1` | New; own tag namespace, same as the other two. |
 | `go-docker.yml` | `go-docker/v1` | Own tag namespace, same as the others. Immutable `go-docker/v1.0.0` alongside. |
 | `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
-| `.pre-commit-hooks.yaml` | `hooks/v1` | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. |
+| `.pre-commit-hooks.yaml` | `hooks/v1.0.0` | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
 
@@ -240,7 +260,7 @@ Requires only `pull-requests: read` — it reads the title off the event payload
 ```yaml
 repos:
   - repo: https://github.com/tclavelloux/promy-github-workflows
-    rev: hooks/v1
+    rev: hooks/v1.0.0
     hooks:
       - id: no-direct-commit-to-main
 ```
