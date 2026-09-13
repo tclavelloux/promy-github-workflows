@@ -1,0 +1,8 @@
+- id: no-direct-commit-to-main
+  name: no direct commits to main
+  description: Fails the commit when HEAD is on a protected branch (default `main`), or detached.
+  entry: hooks/no-direct-commit-to-main.sh
+  language: script
+  always_run: true
+  pass_filenames: false
+  stages: [pre-commit]
