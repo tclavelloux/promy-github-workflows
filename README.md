@@ -117,6 +117,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-lint.yml` | `go-lint/v1` | Own tag namespace; unaffected by the `go-coverage.yml` major bump. |
 | `go-vuln.yml` | `go-vuln/v1` | New; own tag namespace, same as the other two. |
 | `go-docker.yml` | `go-docker/v1` | Own tag namespace, same as the others. Immutable `go-docker/v1.0.0` alongside. |
+| `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
 
 ## `go-vuln.yml`
 
@@ -182,6 +183,46 @@ Requires only `contents: read` — it pushes nothing and posts nothing.
 ### Railway parity is unverified
 
 A GitHub-hosted runner can succeed where Railway fails. If Railway restricts egress to `proxy.golang.org`, it cannot auto-download a newer toolchain, so a `golang:1.24` image building a `go 1.26.8` module breaks there and not here. That asymmetry is why the static gate is the primary check and the build is secondary — the gate fails on the mismatch regardless of whether any builder tolerates it.
+
+## `pr-title.yml`
+
+Fails the PR when its title is not a Conventional Commits string. Wraps `amannn/action-semantic-pull-request`.
+
+The fleet squash-merges, so the PR title *is* the commit message on `main` — and the only string release-please parses to derive the next version and write the CHANGELOG. The `commit-msg` hook never sees a PR title, so branch-level conventional commits are not a backstop. A malformed title ships a malformed release.
+
+```yaml
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  pr-title:
+    uses: tclavelloux/promy-github-workflows/.github/workflows/pr-title.yml@pr-title/v1
+```
+
+Copy the trigger block verbatim. Two parts of it are load-bearing:
+
+- **`edited` is mandatory.** GitHub's default `pull_request` types are `opened`, `synchronize`, `reopened` — a title change fires none of them. Without `edited`, the check goes red on a bad title and stays red forever, because fixing the title dispatches no run. Verified: an edit-only title fix with `edited` present dispatched a new run and flipped the check green.
+- **`pull_request`, not `pull_request_target`.** `promy-frontend` uses `pull_request_target`; that is only required to hand a fork PR a token with write scope or repo secrets. This workflow holds `pull-requests: read`, posts nothing, and checks nothing out. The `promy-*` repos are private and single-maintainer, so fork PRs do not occur — and `pull_request_target` runs the base-branch workflow with an elevated token against untrusted head content, which is the pattern zizmor exists to flag. `pull_request` is strictly the safer ref for the same result.
+
+A reusable workflow is callable from either trigger — `workflow_call` constrains the job, not the caller's event.
+
+`synchronize` is not required for correctness (a push does not change the title) but keeps the check present on every head SHA, so a branch-protection rule requiring it never blocks on a missing run.
+
+### Inputs
+
+| Input | Default | Purpose |
+|---|---|---|
+| `types` | `feat fix docs style refactor perf test build ci chore revert`, newline-separated | Allowed types. Each entry is a regex the action auto-wraps in `^ $`. |
+| `require-scope` | `false` | Require `feat(api): ...` over `feat: ...` |
+| `subject-pattern` | `^.+$` | Regex the subject must match. The default only rejects an empty subject; tighten per-caller (`^(?![A-Z]).+$` bans a leading capital). |
+| `subject-pattern-error` | see workflow | Message shown when `subject-pattern` fails. `{subject}` and `{title}` are substituted by the action. |
+
+Every default matches what `promy-frontend`'s standalone `enforce-conventional-pr-title.yml` already enforces, so adopting this needs no `with:` block.
+
+Requires only `pull-requests: read` — it reads the title off the event payload and reports a check run. It posts no comment and performs no checkout.
 
 ## CI
 
