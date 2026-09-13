@@ -138,18 +138,6 @@ jobs:
 
 Requires only `contents: read` — it posts nothing and needs no `pull-requests: write`.
 
-## CI
-
-`actionlint` and `zizmor` run on every PR (`.github/workflows/ci.yml`), both blocking. A bug here is fleet-wide, so these are the only gates before merge.
-
-- `actionlint` parses every workflow file and shellchecks each `run:` block. Version pinned in `.actionlint-version`.
-- `zizmor` audits the same workflows for security anti-patterns actionlint doesn't check — unpinned action refs, credential persistence, template injection. Version pinned in `.zizmor-version`, mirroring `.actionlint-version`. Installed from zizmor's released binary rather than `uvx zizmor`, so the job needs no Python/uv toolchain — same reasoning as the actionlint install step.
-
-### Action-pinning policy
-
-Every `uses:` in this repo's own workflows is pinned to a full commit SHA with a trailing version comment (`actions/checkout@<sha> # v4.4.0`), not to a mutable tag. `vladopajic/go-test-coverage@v2` matters most: it is the only third-party action, it runs in a job holding `pull-requests: write`, and a mutable major tag is one its maintainer can repoint underneath every caller with no review on this side.
-
-Dependabot (`.github/dependabot.yml`, `github-actions` ecosystem, weekly) is what keeps these pins from going stale — pinning without Dependabot just freezes the fleet on old actions. Each Dependabot PR bumps one SHA and its version comment; it does not touch the per-workflow moving major tags (`go-lint/v1`, `go-coverage/v2`, `go-vuln/v1`) that callers track — those are managed by hand, per the Versioning section above.
 
 ## `go-docker.yml`
 
@@ -194,3 +182,16 @@ Requires only `contents: read` — it pushes nothing and posts nothing.
 ### Railway parity is unverified
 
 A GitHub-hosted runner can succeed where Railway fails. If Railway restricts egress to `proxy.golang.org`, it cannot auto-download a newer toolchain, so a `golang:1.24` image building a `go 1.26.8` module breaks there and not here. That asymmetry is why the static gate is the primary check and the build is secondary — the gate fails on the mismatch regardless of whether any builder tolerates it.
+
+## CI
+
+`actionlint` and `zizmor` run on every PR (`.github/workflows/ci.yml`), both blocking. A bug here is fleet-wide, so these are the only gates before merge.
+
+- `actionlint` parses every workflow file and shellchecks each `run:` block. Version pinned in `.actionlint-version`.
+- `zizmor` audits the same workflows for security anti-patterns actionlint doesn't check — unpinned action refs, credential persistence, template injection. Version pinned in `.zizmor-version`, mirroring `.actionlint-version`. Installed from zizmor's released binary rather than `uvx zizmor`, so the job needs no Python/uv toolchain — same reasoning as the actionlint install step.
+
+### Action-pinning policy
+
+Every `uses:` in this repo's own workflows is pinned to a full commit SHA with a trailing version comment (`actions/checkout@<sha> # v4.4.0`), not to a mutable tag. `vladopajic/go-test-coverage@v2` matters most: it is the only third-party action, it runs in a job holding `pull-requests: write`, and a mutable major tag is one its maintainer can repoint underneath every caller with no review on this side.
+
+Dependabot (`.github/dependabot.yml`, `github-actions` ecosystem, weekly) is what keeps these pins from going stale — pinning without Dependabot just freezes the fleet on old actions. Each Dependabot PR bumps one SHA and its version comment; it does not touch the per-workflow moving major tags (`go-lint/v1`, `go-coverage/v2`, `go-vuln/v1`, `go-docker/v1`) that callers track — those are managed by hand, per the Versioning section above.
