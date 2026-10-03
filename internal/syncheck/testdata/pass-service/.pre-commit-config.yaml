@@ -1,0 +1,83 @@
+# `pre-commit install` only writes the hook types listed here. Without this line it writes
+# .git/hooks/pre-commit alone, and the commit-msg and pre-push stages below never fire.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
+repos:
+  - repo: https://github.com/tclavelloux/promy-github-workflows
+    rev: hooks/v1.2.0
+    hooks:
+      - id: no-direct-commit-to-main
+      - id: workflow-sync
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args:
+          - feat
+          - fix
+          - docs
+          - style
+          - refactor
+          - perf
+          - test
+          - build
+          - ci
+          - chore
+          - revert
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint
+        entry: scripts/golangci-lint.sh run --timeout=5m
+        language: system
+        types: [go]
+        pass_filenames: false
+        require_serial: true
+      - id: golangci-lint-fmt
+        name: golangci-lint-fmt
+        entry: scripts/golangci-lint.sh fmt --diff
+        language: system
+        types: [go]
+        pass_filenames: false
+        require_serial: true
+      - id: golangci-lint-config-verify
+        name: golangci-lint-config-verify
+        entry: scripts/golangci-lint.sh config verify
+        language: system
+        files: '\.golangci\.(yml|yaml)$'
+        pass_filenames: false
+      - id: go-mod-tidy
+        name: go-mod-tidy
+        entry: scripts/go-mod-tidy.sh
+        language: system
+        pass_filenames: false
+        files: '(\.go|go\.mod|go\.sum)$'
+      # `make check-coverage` runs the race suite itself, so no separate `test` pre-push
+      # hook — that would run the suite twice per push. always_run keeps the gate alive on
+      # pushes that touch no .go files.
+      - id: check-coverage
+        name: check-coverage
+        entry: make check-coverage
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

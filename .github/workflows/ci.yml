@@ -40,11 +40,12 @@ jobs:
         run: actionlint -color
 
       # Two duplications this repo cannot remove, so CI governs them instead:
-      #  1. govulncheck version. A reusable workflow cannot read its own private
-      #     repo's files at runtime, so go-vuln.yml and go-vuln-fix.yml each carry
-      #     the version as an input default; the hook reads .govulncheck-version.
+      #  1. govulncheck version. A reusable workflow has no documented context
+      #     exposing its own ref, so it cannot check out its own files at the
+      #     pinned version. go-vuln.yml and go-vuln-fix.yml each carry the version
+      #     as an input default; the hook reads .govulncheck-version.
       #     Drift would make CI, the fix PR and the pre-push hook disagree on findings.
-      #  2. The fix logic. go-vuln-fix.yml inlines it (same private-repo limit);
+      #  2. The fix logic. go-vuln-fix.yml inlines it (same limit);
       #     scripts/go-vuln-fix.sh is its locally testable twin. A diverging twin
       #     would make local tests prove nothing about what runs in CI.
       - name: Check govulncheck pin and go-vuln-fix body sync
@@ -102,3 +103,33 @@ jobs:
 
       - name: Audit workflows
         run: zizmor --persona=regular .github/workflows/
+
+  # Go tests include governance_test.go, which fails when the policy constants in
+  # internal/syncheck/policy.go drift from go-coverage.yml, go-lint.yml,
+  # pr-title.yml or templates/. Same role as the govulncheck pin step above:
+  # CI governs a duplication this repo cannot remove.
+  workflow-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Check gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed on: $(echo "$unformatted" | tr '\n' ' ')"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -count=1 ./...

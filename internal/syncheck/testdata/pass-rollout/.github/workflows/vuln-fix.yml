@@ -1,0 +1,24 @@
+name: Vuln fix
+
+on:
+  schedule:
+    # Weekly, Thursday 06:17 UTC. Offset from Dependabot's Monday sweep to halve
+    # worst-case latency; an off-the-hour minute avoids scheduler congestion.
+    - cron: '17 6 * * 4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-vuln-fix
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    # Must match the reusable workflow's permissions exactly; it can only narrow.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    uses: tclavelloux/promy-github-workflows/.github/workflows/go-vuln-fix.yml@go-vuln-fix/v1

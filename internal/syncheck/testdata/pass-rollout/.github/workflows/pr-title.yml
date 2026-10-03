@@ -1,0 +1,19 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    # Mandatory: this repo's default workflow token is `contents: read` only, and
+    # a called workflow can only narrow the caller's token. Without this block the
+    # `pull-requests: read` request is an escalation and the run dies as
+    # startup_failure -- zero jobs, no log.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: tclavelloux/promy-github-workflows/.github/workflows/pr-title.yml@pr-title/v1

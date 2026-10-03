@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keeps the SHA pins in ci.yml from freezing the repo on stale actions.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Stops CVEs re-accumulating in the module graph after the Phase S sweep.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly

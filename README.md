@@ -76,6 +76,7 @@ A reusable workflow is called at the **job** level. It cannot be a `steps:` entr
 | `timeout` | `5m` | `golangci-lint --timeout` value. A Go duration string, not a number. |
 | `go-version-file` | `go.mod` | Path used to resolve the Go toolchain version |
 | `args` | `""` | Extra one-off flags appended to `golangci-lint run`. Repo-wide linter behavior (enabled linters, exclusions, settings) belongs in the caller's own `.golangci.yml` — this input is for one-off flags only. Flags are word-split on whitespace but not glob-expanded, so `--skip-dirs vendor/*` reaches `golangci-lint` literally instead of expanding against the runner's filesystem. |
+| `workflow-sync` | `false` | Run the fleet `workflow-sync` pre-commit hook at the caller's pinned `rev:` over the whole repo, as the last step (runs even if an earlier step failed). Requires `- id: workflow-sync` in the caller's `.pre-commit-config.yaml`. See [docs/workflow-sync.md](docs/workflow-sync.md). |
 
 Requires only `contents: read` — unlike `go-coverage.yml`, it posts nothing and needs no `pull-requests: write`.
 
@@ -138,9 +139,9 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-vuln.yml` | `go-vuln/v1` | New; own tag namespace, same as the other two. |
 | `go-docker.yml` | `go-docker/v1` | Own tag namespace, same as the others. Immutable `go-docker/v1.0.0` alongside. |
 | `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
-| `dependabot-automerge.yml` | `dependabot-automerge/v1` | Planned — not yet cut. Immutable `dependabot-automerge/v1.0.0` alongside. |
-| `go-vuln-fix.yml` | `go-vuln-fix/v1` | Planned — not yet cut. Immutable `go-vuln-fix/v1.0.0` alongside. |
-| `.pre-commit-hooks.yaml` | `hooks/v1.0.0`; `hooks/v1.1.0` planned — not yet cut (adds `go-vuln`) | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
+| `dependabot-automerge.yml` | `dependabot-automerge/v1` | Own tag namespace, same as the others. Immutable `dependabot-automerge/v1.0.0` alongside. |
+| `go-vuln-fix.yml` | `go-vuln-fix/v1` | Own tag namespace, same as the others. Immutable `go-vuln-fix/v1.0.0` alongside. |
+| `.pre-commit-hooks.yaml` | `hooks/v1.1.0` (adds `go-vuln`); `hooks/v1.2.0` planned (adds `workflow-sync`). `hooks/v1.0.0` has neither | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
 
@@ -257,7 +258,7 @@ Requires only `pull-requests: read` — it reads the title off the event payload
 
 ## `dependabot-automerge.yml`
 
-Squash-merges a Dependabot Go-module PR once every check on its head commit is green. Planned tag `dependabot-automerge/v1` — not yet cut. Rollout and limits: [docs/dependency-automation.md](docs/dependency-automation.md).
+Squash-merges a Dependabot Go-module PR once every check on its head commit is green. Tag `dependabot-automerge/v1`. Rollout and limits: [docs/dependency-automation.md](docs/dependency-automation.md).
 
 Call it as the **last job of the caller's own `ci.yml`** (`on: pull_request`), with `needs:` listing every other job:
 
@@ -306,7 +307,7 @@ The squash commit is pushed by `GITHUB_TOKEN`, so it starts no workflows. releas
 
 ## `go-vuln-fix.yml`
 
-Weekly, patches the module advisories govulncheck reports as **called** and opens a `fix(deps)` PR. Planned tag `go-vuln-fix/v1` — not yet cut.
+Weekly, patches the module advisories govulncheck reports as **called** and opens a `fix(deps)` PR. Tag `go-vuln-fix/v1`.
 
 ```yaml
 name: Vuln fix
@@ -365,10 +366,11 @@ GH_TOKEN= gh run list --workflow "Vuln fix" --limit 50 --json databaseId -q '.[]
 ```yaml
 repos:
   - repo: https://github.com/tclavelloux/promy-github-workflows
-    rev: hooks/v1.1.0   # hooks/v1.0.0 has no go-vuln; hooks/v1.1.0 is planned, not yet cut
+    rev: hooks/v1.2.0   # hooks/v1.0.0 has no go-vuln; hooks/v1.1.0 has no workflow-sync
     hooks:
       - id: no-direct-commit-to-main
       - id: go-vuln
+      - id: workflow-sync
 ```
 
 The repo is public, so pre-commit clones it over anonymous HTTPS — no token, no SSH key, no credential helper. Hooks resolve on a fresh machine and in CI.
@@ -426,7 +428,17 @@ vuln:
 
 Bypass once: `SKIP=go-vuln git push`.
 
-`rev:` must be the immutable `hooks/v1.1.0`, never `hooks/v1`; see the pinning note above.
+`rev:` must be an immutable `hooks/vX.Y.Z` tag, never `hooks/v1`; see the pinning note above.
+
+### `workflow-sync`
+
+Checks the repo's CI wiring against the fleet policy at the caller's pinned `rev:`: `ci.yml` shape, `pr-title.yml`, `release-please.yml`, SHA-pinned actions, `.pre-commit-config.yaml`, `Makefile` and the pinned tool files. `language: golang`, so the system `go` must be on `PATH`. Stages: `pre-commit`, `manual`.
+
+```yaml
+      - id: workflow-sync
+```
+
+CI runs the same hook when the `lint` job sets `with: {workflow-sync: true}` (see the go-lint input). Rule catalogue, exemptions, limits and rollout: [docs/workflow-sync.md](docs/workflow-sync.md). Repo settings that CI cannot read: `GH_TOKEN= scripts/check-repo-settings.sh`.
 
 ### Why it is centralised
 
@@ -438,10 +450,12 @@ A hook is not a substitute for a server-side rule — it runs only where it is i
 
 ## CI
 
-`actionlint` and `zizmor` run on every PR (`.github/workflows/ci.yml`), both blocking. A bug here is fleet-wide, so these are the only gates before merge.
+`actionlint`, `zizmor` and `workflow-sync` run on every PR (`.github/workflows/ci.yml`), all blocking. A bug here is fleet-wide, so these are the only gates before merge.
 
 - `actionlint` parses every workflow file and shellchecks each `run:` block. Version pinned in `.actionlint-version`.
 - `zizmor` audits the same workflows for security anti-patterns actionlint doesn't check — unpinned action refs, credential persistence, template injection. Version pinned in `.zizmor-version`, mirroring `.actionlint-version`. Installed from zizmor's released binary rather than `uvx zizmor`, so the job needs no Python/uv toolchain — same reasoning as the actionlint install step.
+
+- `workflow-sync` runs `gofmt -l`, `go vet` and `go test ./...`. The tests include `internal/syncheck/governance_test.go`, which fails when the policy constants drift from `go-coverage.yml`, `go-lint.yml`, `pr-title.yml` or `templates/`.
 
 ### Action-pinning policy
 
