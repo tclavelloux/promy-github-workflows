@@ -1,0 +1,26 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release Please
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          # Release type determines how version bumps are calculated
+          release-type: go
+          # Package name for the release
+          package-name: promy-crm
+          # Path to the manifest file (optional, defaults to root)
+          manifest-file: .release-please-manifest.json
+          # Path to the config file (optional)
+          config-file: release-please-config.json
