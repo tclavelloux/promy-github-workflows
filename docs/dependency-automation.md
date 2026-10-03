@@ -5,7 +5,7 @@
 - 2026-10-03 outage: two `// indirect` modules (otel sdk/otlptrace GO-2026-6505, grpc GO-2026-6348) failed every `vuln` job. `dependency-type: direct` never bumps them.
 - Zero Dependabot PRs have ever merged; ~9-10 are open per repo (re-counted 2026-10-03). Each rewrites `go.sum`, so ungrouped they merge only one at a time.
 - No branch protection: free private plan, `gh api .../branches/main/protection` returns 403.
-- No PAT, by choice (FLEET-STATUS §6). Everything runs on `GITHUB_TOKEN`.
+- No PAT, by choice. Everything runs on `GITHUB_TOKEN`.
 
 ## Pieces
 
@@ -76,4 +76,4 @@ All tags are planned, not yet cut.
 3. First-run verification:
    - Watch the first grouped gomod PR's `automerge` job summary. Expect a merge or a precise reason.
    - Run `gh workflow run "Vuln fix"` once per repo (`workflow_dispatch` works with a user token). Confirm the `vuln-record` line in the run log.
-   - Make each gate fail once; a green check is not verification (FLEET-STATUS §5). Example: a Dependabot PR with a failing check must leave `automerge` skipped. Repeat for a major bump, a human-pushed extra commit and a `github-actions` PR.
+   - Make each gate fail once; a green check is not verification. Example: a Dependabot PR with a failing check must leave `automerge` skipped. Repeat for a major bump, a human-pushed extra commit and a `github-actions` PR.
