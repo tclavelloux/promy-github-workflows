@@ -24,6 +24,15 @@ While constrained, push with `[skip ci]` on its own line in the **commit body**.
 
 ## 2. Exact pause state
 
+> **Re-verified 2026-10-03.** The table below is a snapshot. Nothing in C3 stage 3 has merged since — no repo has the branch guard on `main`. Three things have drifted and will mislead you if trusted blindly:
+>
+> - **`promy-crm`, `promy-product` and `promy-user` are all still checked out on branch `chore/align-precommit-hooks`**, and all three now carry **unrelated dirty files** from the intervening weeks: `CLAUDE.md` in all three, `docker-compose.yaml` in product and user. **These are not ours — do not commit them.** `promy-user`'s C3 work (`.pre-commit-config.yaml`, `Makefile`) is now entangled with them in the same dirty tree, so stage by explicit path only.
+> - **`promy-crm#54` is `CLEAN`; `promy-product#91` is `UNSTABLE`** (a check is failing — determine whether it is a real failure or a leftover from the budget-exhaustion window before merging).
+> - **Dependabot has kept opening PRs**: roughly 9-10 open per repo now, against the ~38 recorded in §7. Re-count before planning that triage.
+>
+> Verify each row below against the live repos rather than trusting it.
+
+
 Phase C3 stage 3 aligns pre-commit configuration across the five service repos. `promy-template-go` (stage 2) is already done and merged.
 
 | Repo | Local branch | `main` migrated? | State |
