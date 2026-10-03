@@ -258,7 +258,7 @@ CI cannot be added until a manifest exists — there is nothing to install from.
 - Branch off `main`; never commit on `main`.
 - `git commit -S` always. Never `--no-gpg-sign`, never `--no-verify`.
 - Never `git add .` or `git add -u` — explicit paths only.
-- **Squash-merge only, fleet-wide** (arbitrated 2026-09-13, #13). The PR title becomes the commit on `main` and is the only thing release-please parses, so it must be a clean Conventional Commits string. Atomicity lives at the PR boundary — splitting commits within a branch is cosmetic.
+- **Squash-merge only, fleet-wide** (arbitrated 2026-09-13, #13). The PR title becomes the commit on `main` and is the only thing release-please parses, so it must be a clean Conventional Commits string. The unit of change is the PR: one business purpose per PR (a whole feature, fix or chore, however many commits); never a PR per commit or per layer, never unrelated purposes bundled.
 - End commit bodies with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; end PR bodies with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 - Merging workflow-file PRs needs `workflow` scope, which the `GH_TOKEN` env var lacks. Prefix `gh` commands with `GH_TOKEN=` to fall back to the keyring token.
 - Verify subagent claims independently before merging. Their reports have been accurate on substance but have twice overstated what was actually exercised.
