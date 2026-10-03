@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ""
+      workflow-sync:
+        description: "Run the fleet `workflow-sync` pre-commit hook at the caller's pinned `rev:` over the whole repo. Requires `- id: workflow-sync` under the promy-github-workflows entry of the caller's .pre-commit-config.yaml."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -119,3 +124,15 @@ jobs:
         # 0 when tidy — verified directly. Requires no network fetch beyond
         # what setup-go's module resolution already needs.
         run: go mod tidy -diff
+
+      # Policy and code come from the caller's immutable hook `rev:`, so the local
+      # hook and this step run the identical check. Folded into lint rather than a
+      # separate reusable workflow: Actions bills each job rounded up to a minute.
+      # setup-go has already run above, so pre-commit's `language: golang` builds
+      # the hook with the caller's toolchain.
+      - name: Check fleet governance (workflow-sync)
+        # Runs even when an earlier lint step failed, so a PR sees every red at once.
+        if: ${{ inputs.workflow-sync && !cancelled() }}
+        env:
+          PRE_COMMIT_VERSION: 4.6.0
+        run: pipx run --spec "pre-commit==${PRE_COMMIT_VERSION}" pre-commit run workflow-sync --all-files --color=never
