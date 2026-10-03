@@ -1,0 +1,54 @@
+# Canonical .github/dependabot.yml for the six promy Go repos.
+#
+# - Majors sit outside every group on purpose: each stays an individual PR for
+#   human validation (gitleaks-action v3, release-please-action v5).
+# - `dependency-type: all` exists because the 2026-10-03 outage was two
+#   `// indirect` modules (otel sdk/otlptrace GO-2026-6505, grpc GO-2026-6348)
+#   that `direct` never bumps. Grouping keeps it to one PR per week.
+# - `prefix: build` pins today's auto-detected `build(deps):` title. pr-title.yml
+#   accepts it; release-please treats it as non-releasing.
+# - `cooldown` is the supply-chain buffer now that gomod PRs auto-merge.
+#   Security updates bypass it.
+# - The github-actions group still needs a human merge: GITHUB_TOKEN cannot
+#   merge changes to workflow files.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Paris
+    commit-message:
+      prefix: build
+      include: scope
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Paris
+    allow:
+      - dependency-type: all
+    commit-message:
+      prefix: build
+      include: scope
+    cooldown:
+      default-days: 3
+    groups:
+      gomod:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+      gomod-security:
+        applies-to: security-updates
+        patterns: ["*"]

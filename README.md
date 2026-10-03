@@ -138,7 +138,9 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-vuln.yml` | `go-vuln/v1` | New; own tag namespace, same as the other two. |
 | `go-docker.yml` | `go-docker/v1` | Own tag namespace, same as the others. Immutable `go-docker/v1.0.0` alongside. |
 | `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
-| `.pre-commit-hooks.yaml` | `hooks/v1.0.0` | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
+| `dependabot-automerge.yml` | `dependabot-automerge/v1` | Planned — not yet cut. Immutable `dependabot-automerge/v1.0.0` alongside. |
+| `go-vuln-fix.yml` | `go-vuln-fix/v1` | Planned — not yet cut. Immutable `go-vuln-fix/v1.0.0` alongside. |
+| `.pre-commit-hooks.yaml` | `hooks/v1.0.0`; `hooks/v1.1.0` planned — not yet cut (adds `go-vuln`) | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
 
@@ -253,6 +255,109 @@ Every default matches what `promy-frontend`'s standalone `enforce-conventional-p
 
 Requires only `pull-requests: read` — it reads the title off the event payload and reports a check run. It posts no comment and performs no checkout.
 
+## `dependabot-automerge.yml`
+
+Squash-merges a Dependabot Go-module PR once every check on its head commit is green. Planned tag `dependabot-automerge/v1` — not yet cut. Rollout and limits: [docs/dependency-automation.md](docs/dependency-automation.md).
+
+Call it as the **last job of the caller's own `ci.yml`** (`on: pull_request`), with `needs:` listing every other job:
+
+```yaml
+  # List EVERY other job in `needs:`. The in-workflow check-run verification is
+  # the backstop, not the primary gate.
+  automerge:
+    needs: [lint, vuln]
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      actions: read
+      statuses: read
+    uses: tclavelloux/promy-github-workflows/.github/workflows/dependabot-automerge.yml@dependabot-automerge/v1
+```
+
+Merges only when all of these hold:
+
+- Ecosystem is `gomod`; update type is patch or minor (`dependabot/fetch-metadata`, SHA-pinned).
+- Every commit on the PR is authored by `dependabot[bot]`, not only the first one fetch-metadata checks.
+- Every other check run on the head SHA is `completed` with `success`, `neutral` or `skipped`; no legacy commit status is `failure`, `error` or `pending`.
+- The head SHA is unchanged at merge time (`gh pr merge --squash --match-head-commit`).
+
+Never merges:
+
+- Major bumps. Rejected in the script even if listed in `merge-update-types`.
+- `github-actions` bumps. `GITHUB_TOKEN` lacks the `workflows` permission and cannot merge workflow-file changes.
+- release-please PRs.
+- Anything a human touched (extra commit, non-Dependabot author).
+
+A non-merge decision exits 0 with a `::notice` and a step summary. A red check would duplicate the real failure.
+
+### Inputs
+
+| Input | Default | Purpose |
+|---|---|---|
+| `merge-update-types` | `version-update:semver-patch version-update:semver-minor` | Allowlist of fetch-metadata `update-type` values |
+| `wait-attempts` | `10` | Polls for check runs outside this run (e.g. `pr-title.yml`) before giving up without merging |
+| `wait-seconds` | `15` | Seconds between polls |
+
+Needs `contents: write`, `pull-requests: write`, `checks: read`, `actions: read`, `statuses: read`. The caller job must grant exactly these; a called workflow can only narrow them.
+
+The squash commit is pushed by `GITHUB_TOKEN`, so it starts no workflows. release-please's `push: main` run does not fire until the next human merge, which refreshes its PR. Nothing is lost: release-please scans every commit since the last release, and `build(deps)` commits are non-releasing.
+
+## `go-vuln-fix.yml`
+
+Weekly, patches the module advisories govulncheck reports as **called** and opens a `fix(deps)` PR. Planned tag `go-vuln-fix/v1` — not yet cut.
+
+```yaml
+name: Vuln fix
+
+on:
+  schedule:
+    - cron: '17 6 * * 4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-vuln-fix
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    uses: tclavelloux/promy-github-workflows/.github/workflows/go-vuln-fix.yml@go-vuln-fix/v1
+```
+
+Behaviour:
+
+- Module path: group findings by module, take the highest `fixed_version`, run `go get`, `go mod tidy`, `go build ./...`, rescan. Abort to the issue path if the `go` or `toolchain` directive would change.
+- Stdlib path (stdlib/toolchain findings, or module findings with no fix): one rolling issue per repo, marker `<!-- go-vuln-fix:stdlib -->`. Never touches `go` directives or Dockerfiles.
+- Dedupe: branch `fix/vuln-<12 hex of sha256 over the sorted IDs>`. An open PR on that branch skips the run. A **closed-unmerged** PR on that branch means rejected and is never retried.
+- A new PR closes older open `fix/vuln-*` PRs by `github-actions[bot]` as superseded. The new scan starts from current `main`, so it is a superset.
+- The commit goes through GraphQL `createCommitOnBranch` (GitHub-signed, no credentials on disk).
+- **CI does not run on the PR.** `GITHUB_TOKEN`-created PRs start no workflows. Close and reopen the PR (fires `reopened`) before merging.
+
+### Inputs
+
+| Input | Default | Purpose |
+|---|---|---|
+| `govulncheck-version` | `v1.8.0` | Must equal `go-vuln.yml`'s default; this repo's CI enforces it |
+| `go-version-file` | `go.mod` | Path used to resolve the Go toolchain |
+| `base-branch` | `''` (repo default branch) | Branch to scan and open the PR against |
+
+Needs `contents: write`, `pull-requests: write`, `issues: write`; the caller job must grant exactly these.
+
+Every run, clean ones included, emits `::notice title=vuln-record::<date> <repo> <IDs|none> <action>` and a step-summary row. Measure frequency:
+
+```bash
+GH_TOKEN= gh run list --workflow "Vuln fix" --limit 50 --json databaseId -q '.[].databaseId' \
+  | xargs -I{} sh -c 'gh run view {} --log 2>/dev/null | grep vuln-record'
+```
+
 ## Shared pre-commit hooks
 
 `.pre-commit-hooks.yaml` at the repo root makes this repo a pre-commit **remote hook repository**, alongside its reusable workflows. Callers add it to their own `.pre-commit-config.yaml`:
@@ -260,9 +365,10 @@ Requires only `pull-requests: read` — it reads the title off the event payload
 ```yaml
 repos:
   - repo: https://github.com/tclavelloux/promy-github-workflows
-    rev: hooks/v1.0.0
+    rev: hooks/v1.1.0   # hooks/v1.0.0 has no go-vuln; hooks/v1.1.0 is planned, not yet cut
     hooks:
       - id: no-direct-commit-to-main
+      - id: go-vuln
 ```
 
 The repo is public, so pre-commit clones it over anonymous HTTPS — no token, no SSH key, no credential helper. Hooks resolve on a fresh machine and in CI.
@@ -294,6 +400,33 @@ The protected branch is configurable through `args:`, taking one or more branch 
 ```
 
 Every `promy-*` repo uses `main` today, so the default covers all six. The argument exists because a branch name baked into a shared hook is a value six callers cannot override without forking the hook — the exact coupling this repo removes elsewhere.
+
+### `go-vuln`
+
+Runs the fleet-pinned `govulncheck` locally, with the same Go toolchain CI uses. Stages: `pre-push`, `manual`.
+
+- Version: `.govulncheck-version` in the hook clone, so the caller's immutable `rev:` pins it. CI ties that file to `go-vuln.yml` and `go-vuln-fix.yml`.
+- Toolchain: `GOTOOLCHAIN` is set from go.mod (`toolchain`, else `go`) when it is a full `x.y.z`. This fixes local CVE counts understating CI.
+- Binary cached per version under `${XDG_CACHE_HOME:-~/.cache}/promy-go-vuln/<version>/`; `~/go/bin` is untouched.
+
+| Context | Mode | Why |
+|---|---|---|
+| `pre-push`, range touches `go.mod`/`go.sum` | **block** | A dependency change is where the fix belongs |
+| `pre-push`, range does not touch them | **warn** (exit 0) | An advisory published today must not block unrelated work |
+| `manual` stage, `make vuln`, `--all-files` | **block** | Explicit request |
+
+`GO_VULN_MODE=block|warn` overrides. Block mode fails closed on scanner errors; warn mode reports and exits 0.
+
+Add the `make vuln` target (`templates/Makefile.vuln.mk`):
+
+```make
+vuln:
+	pre-commit run go-vuln --hook-stage manual
+```
+
+Bypass once: `SKIP=go-vuln git push`.
+
+`rev:` must be the immutable `hooks/v1.1.0`, never `hooks/v1`; see the pinning note above.
 
 ### Why it is centralised
 
