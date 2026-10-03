@@ -1,0 +1,422 @@
+name: Go Vulnerability Fix
+
+# Weekly, patches the Go module advisories govulncheck reports as CALLED by the
+# caller's code: bumps each affected module to its fixed version, verifies the
+# build and a clean rescan, then opens a `fix(deps)` PR. Standard-library,
+# toolchain and unfixable advisories open one rolling issue instead.
+#
+# Call it from a `schedule` + `workflow_dispatch` caller; see
+# templates/go-vuln-fix-caller.yml. Weekly (Thursday) because advisories land
+# every few weeks, Dependabot's grouped sweep already runs Monday, and the
+# pre-push hook plus every PR's `vuln` job surface them sooner locally.
+#
+# LIMITATION: the PR is opened with GITHUB_TOKEN, which by design starts no
+# workflows. CI does NOT run on it. A human must close and reopen the PR (fires
+# `reopened`) or push a commit to it before merging. The PR body says so.
+#
+# The fix logic is inlined below, not read from scripts/go-vuln-fix.sh: a
+# reusable workflow's checkout resolves to the CALLER repo, and the governance
+# repo is private, so the caller's GITHUB_TOKEN cannot fetch the script. The
+# block between the `go-vuln-fix body` markers must stay byte-identical to the
+# same block in scripts/go-vuln-fix.sh (the locally testable twin).
+#
+# The `go` directive, the `toolchain` directive and the Dockerfiles are never
+# touched. A fix that would change a directive is aborted and routed to the
+# issue: Go toolchain bumps need go.mod, Dockerfile and dev.Dockerfile moved
+# together by a human (see go-docker.yml).
+
+on:
+  workflow_call:
+    inputs:
+      govulncheck-version:
+        description: govulncheck version to install (with or without a leading `v`). MUST equal go-vuln.yml's default; governance CI enforces it, so change both together or not at all.
+        required: false
+        type: string
+        default: v1.8.0
+      go-version-file:
+        description: Path to the go.mod (or go.work) file used to resolve the Go toolchain version.
+        required: false
+        type: string
+        default: go.mod
+      base-branch:
+        description: Branch to scan and open the PR against. Empty means the repository default branch.
+        required: false
+        type: string
+        default: ''
+
+# The caller's job must grant exactly these: a called workflow can only narrow
+# the caller's permissions, never widen them.
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.base-branch }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+
+      - name: Resolve govulncheck version
+        id: version
+        env:
+          RAW_VERSION: ${{ inputs.govulncheck-version }}
+        run: |
+          # Normalize: strip a leading 'v' if present, then re-add it consistently,
+          # mirroring go-vuln.yml.
+          VERSION="${RAW_VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache govulncheck binary
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-v${{ steps.version.outputs.version }}-${{ runner.os }}
+
+      - name: Install govulncheck
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          # setup-go v7 defaults GOTOOLCHAIN to `local`, which makes `go install`
+          # refuse any tool whose go.mod requires a newer Go than the caller's.
+          # Same override as go-vuln.yml; scoped to this step only.
+          GOTOOLCHAIN: auto
+        run: go install "golang.org/x/vuln/cmd/govulncheck@v${VERSION}"
+
+      - name: Print govulncheck version
+        run: govulncheck -version
+
+      - name: Scan and patch
+        id: fix
+        run: |
+          # The default `run:` shell is `bash -e` with no pipefail; the body relies on both.
+          set -euo pipefail
+
+          # >>> go-vuln-fix body
+          # Keep this block byte-identical between scripts/go-vuln-fix.sh and
+          # .github/workflows/go-vuln-fix.yml (governance CI diffs them).
+          # Usage: go_vuln_fix <govulncheck-binary> <outdir>   (run from the module root)
+          # Return codes: 0 scan completed (fixed or nothing to fix), 2 scanner error,
+          # 3 fix aborted (go.mod/go.sum restored, reason in <outdir>/abort.txt).
+          go_vuln_fix() {
+            local bin="$1" out="$2"
+            local called='.[] | select(.finding) | .finding | select(.trace[0].function != null)'
+            local not_std='select(.trace[0].module != "stdlib" and .trace[0].module != "toolchain")'
+            local go0 tc0 go1 tc1 mod
+
+            mkdir -p "$out"
+            rm -f "$out/abort.txt"
+            : > "$out/module.tsv"; : > "$out/stdlib.tsv"; : > "$out/unfixable.tsv"
+            : > "$out/ids.txt"; : > "$out/targets.txt"
+            echo false > "$out/changed.txt"
+
+            go0=$(go mod edit -json | jq -r '.Go // ""')
+            tc0=$(go mod edit -json | jq -r '.Toolchain // ""')
+
+            # govulncheck -format json exits 0 even when it finds vulnerabilities, so a
+            # non-zero exit here is a scanner failure, never a finding.
+            if ! "$bin" -format json ./... > "$out/scan1.json"; then
+              echo "govulncheck failed" > "$out/abort.txt"
+              return 2
+            fi
+
+            jq -r -s "$called | $not_std | select(.fixed_version != null)
+              | [.osv, .trace[0].module, .fixed_version] | @tsv" "$out/scan1.json" | sort -u > "$out/module.tsv"
+            jq -r -s "$called | select(.trace[0].module == \"stdlib\" or .trace[0].module == \"toolchain\")
+              | [.osv, (.fixed_version // \"\")] | @tsv" "$out/scan1.json" | sort -u > "$out/stdlib.tsv"
+            jq -r -s "$called | $not_std | select(.fixed_version == null)
+              | [.osv, .trace[0].module] | @tsv" "$out/scan1.json" | sort -u > "$out/unfixable.tsv"
+            cut -f1 "$out/module.tsv" | sort -u > "$out/ids.txt"
+
+            if [ -s "$out/module.tsv" ]; then
+              # One target per module at the highest fixed_version any advisory demands.
+              cut -f2 "$out/module.tsv" | sort -u | while read -r mod; do
+                printf '%s@%s\n' "$mod" "$(awk -F'\t' -v m="$mod" '$2 == m { print $3 }' "$out/module.tsv" | sort -V | tail -n 1)"
+              done > "$out/targets.txt"
+
+              # Word-split targets into args; module paths and versions contain no spaces.
+              # shellcheck disable=SC2046
+              if ! GOTOOLCHAIN=local go get $(cat "$out/targets.txt") > "$out/go-get.log" 2>&1; then
+                git checkout -- go.mod go.sum
+                { echo "go get failed:"; tail -n 20 "$out/go-get.log"; } > "$out/abort.txt"
+                return 3
+              fi
+              if ! GOTOOLCHAIN=local go mod tidy >> "$out/go-get.log" 2>&1; then
+                git checkout -- go.mod go.sum
+                { echo "go mod tidy failed:"; tail -n 20 "$out/go-get.log"; } > "$out/abort.txt"
+                return 3
+              fi
+
+              go1=$(go mod edit -json | jq -r '.Go // ""')
+              tc1=$(go mod edit -json | jq -r '.Toolchain // ""')
+              if [ "$go0" != "$go1" ] || [ "$tc0" != "$tc1" ]; then
+                git checkout -- go.mod go.sum
+                echo "fix would change the go directive (${go0:-none} -> ${go1:-none}) or toolchain directive (${tc0:-none} -> ${tc1:-none}); left to a human" > "$out/abort.txt"
+                return 3
+              fi
+
+              if ! GOTOOLCHAIN=local go build ./... > "$out/build.log" 2>&1; then
+                git checkout -- go.mod go.sum
+                { echo "go build failed after the bump:"; tail -n 20 "$out/build.log"; } > "$out/abort.txt"
+                return 3
+              fi
+
+              if ! "$bin" -format json ./... > "$out/scan2.json"; then
+                git checkout -- go.mod go.sum
+                echo "govulncheck failed on the verification rescan" > "$out/abort.txt"
+                return 3
+              fi
+              jq -r -s "$called | $not_std | .osv" "$out/scan2.json" | sort -u > "$out/remaining.txt"
+              if [ -n "$(grep -Fxf "$out/ids.txt" "$out/remaining.txt" || true)" ]; then
+                git checkout -- go.mod go.sum
+                echo "advisories still called after the bump: $(grep -Fxf "$out/ids.txt" "$out/remaining.txt" | paste -sd, -)" > "$out/abort.txt"
+                return 3
+              fi
+            fi
+
+            # Dedup key: same advisory set -> same branch -> no duplicate PR.
+            if command -v sha256sum > /dev/null 2>&1; then
+              sha256sum "$out/ids.txt" | cut -c1-12 > "$out/hash.txt"
+            else
+              shasum -a 256 "$out/ids.txt" | cut -c1-12 > "$out/hash.txt"
+            fi
+            if git diff --quiet -- go.mod go.sum; then echo false > "$out/changed.txt"; else echo true > "$out/changed.txt"; fi
+
+            echo "module advisories fixed: $(wc -l < "$out/ids.txt" | tr -d ' ') (changed=$(cat "$out/changed.txt"))"
+            echo "stdlib advisories (human): $(cut -f1 "$out/stdlib.tsv" | sort -u | wc -l | tr -d ' ')"
+            echo "unfixable module advisories (human): $(cut -f1 "$out/unfixable.tsv" | sort -u | wc -l | tr -d ' ')"
+            return 0
+          }
+          # <<< go-vuln-fix body
+
+          out="$RUNNER_TEMP/vuln-fix"
+          rc=0
+          # `& wait` instead of `|| rc=$?`: a `||` list would disable errexit
+          # inside the function and let an unexpected failure read as "clean".
+          go_vuln_fix "$(command -v govulncheck)" "$out" & wait "$!" || rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::error title=govulncheck failed::scanner error, no fix attempted"
+            exit 2
+          fi
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+            exit "$rc"
+          fi
+          {
+            echo "ids=$(paste -sd, - < "$out/ids.txt")"
+            echo "hash=$(cat "$out/hash.txt" 2>/dev/null || true)"
+            echo "targets=$(paste -sd' ' - < "$out/targets.txt")"
+            echo "changed=$(cat "$out/changed.txt")"
+            echo "stdlib_ids=$(cut -f1 "$out/stdlib.tsv" | sort -u | paste -sd, -)"
+            echo "unfixable_ids=$(cut -f1 "$out/unfixable.tsv" | sort -u | paste -sd, -)"
+            if [ "$rc" -eq 3 ]; then
+              echo "aborted=true"
+              echo "abort_reason=$(head -c 300 "$out/abort.txt" | tr '\n' ' ')"
+            else
+              echo "aborted=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open fix PR
+        id: pr
+        if: steps.fix.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ inputs.base-branch || github.event.repository.default_branch }}
+          HASH: ${{ steps.fix.outputs.hash }}
+          IDS: ${{ steps.fix.outputs.ids }}
+          TARGETS: ${{ steps.fix.outputs.targets }}
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/vuln-fix"
+          branch="fix/vuln-$HASH"
+          BASE="${BASE:-$(gh api "repos/$REPO" -q .default_branch)}"
+
+          # Dedupe on the advisory set: same IDs -> same branch.
+          existing=$(gh pr list --repo "$REPO" --head "$branch" --state all --json number,state)
+          open_pr=$(jq -r '[.[] | select(.state == "OPEN")][0].number // empty' <<< "$existing")
+          closed_pr=$(jq -r '[.[] | select(.state == "CLOSED")][0].number // empty' <<< "$existing")
+          if [ -n "$open_pr" ]; then
+            echo "::notice title=vuln-fix::PR #$open_pr already open for $branch"
+            echo "action=skipped-open" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$closed_pr" ]; then
+            echo "::notice title=vuln-fix::PR #$closed_pr for $branch was previously rejected; not reopening"
+            echo "action=skipped-rejected" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Base the branch on the commit that was scanned, so the committed
+          # go.mod/go.sum never overwrite a newer base-branch state.
+          base_sha=$(git rev-parse HEAD)
+          if ! gh api -X POST "repos/$REPO/git/refs" -f "ref=refs/heads/$branch" -f "sha=$base_sha" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/heads/$branch" -f "sha=$base_sha" -F force=true > /dev/null
+          fi
+
+          ids_spaced="${IDS//,/, }"
+          title="fix(deps): patch $ids_spaced"
+          if [ "${#title}" -gt 72 ]; then
+            title="fix(deps): patch $(tr ',' '\n' <<< "$IDS" | wc -l | tr -d ' ') Go vulnerabilities"
+          fi
+
+          # createCommitOnBranch: GitHub signs the commit (Verified) and no git
+          # credential is ever written to disk.
+          gosum_b64=""
+          if [ -f go.sum ]; then gosum_b64=$(base64 < go.sum | tr -d '\n'); fi
+          jq -n \
+            --arg query 'mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }' \
+            --arg repo "$REPO" \
+            --arg branch "$branch" \
+            --arg oid "$base_sha" \
+            --arg headline "$title" \
+            --arg body "Bump to the fixed versions: $TARGETS" \
+            --arg gomod "$(base64 < go.mod | tr -d '\n')" \
+            --arg gosum "$gosum_b64" \
+            '{query: $query, variables: {input: {
+               branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+               expectedHeadOid: $oid,
+               message: {headline: $headline, body: $body},
+               fileChanges: {additions: (
+                 [{path: "go.mod", contents: $gomod}]
+                 + (if $gosum != "" then [{path: "go.sum", contents: $gosum}] else [] end)
+               )}}}}' > "$tmp/commit.json"
+          gh api graphql --input "$tmp/commit.json" > "$tmp/commit-result.json"
+          jq -e '.data.createCommitOnBranch.commit.oid' "$tmp/commit-result.json" > /dev/null
+
+          {
+            echo "**CI has not run on this PR.** It was opened with \`GITHUB_TOKEN\`, which by design starts no workflows. Close and reopen it (fires \`reopened\`) or push a commit to run CI before merging."
+            echo
+            echo '### Advisories'
+            tr ',' '\n' <<< "$IDS" | while read -r id; do
+              echo "- [$id](https://pkg.go.dev/vuln/$id)"
+            done
+            echo
+            echo '### Bumps'
+            tr ' ' '\n' <<< "$TARGETS" | while read -r target; do
+              echo "- \`$target\`"
+            done
+            echo
+            echo "The \`go\` directive is unchanged; govulncheck re-verified clean for these IDs."
+          } > "$tmp/pr-body.md"
+
+          pr_url=$(gh pr create --repo "$REPO" --base "$BASE" --head "$branch" --title "$title" --body-file "$tmp/pr-body.md")
+          pr_number="${pr_url##*/}"
+
+          # The new scan starts from the current base branch, so it is a
+          # superset of any older automated fix PR: close those.
+          gh pr list --repo "$REPO" --state open --json number,headRefName,author --limit 100 \
+            | jq -r --arg b "$branch" '.[]
+                | select(.headRefName | startswith("fix/vuln-"))
+                | select(.headRefName != $b)
+                | select(.author.login == "app/github-actions" or .author.login == "github-actions[bot]")
+                | .number' \
+            | while read -r old; do
+                gh pr close "$old" --repo "$REPO" --comment "Superseded by #$pr_number"
+              done
+
+          {
+            echo "pr=$pr_url"
+            echo "action=opened"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update toolchain/unfixable issue
+        id: issue
+        if: steps.fix.outputs.stdlib_ids != '' || steps.fix.outputs.unfixable_ids != '' || steps.fix.outputs.aborted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          STDLIB_IDS: ${{ steps.fix.outputs.stdlib_ids }}
+          UNFIXABLE_IDS: ${{ steps.fix.outputs.unfixable_ids }}
+          ABORTED: ${{ steps.fix.outputs.aborted }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/vuln-fix"
+          marker='<!-- go-vuln-fix:stdlib -->'
+          title='security: Go toolchain/unfixable vulnerabilities need a human'
+
+          {
+            echo "$marker"
+            echo "Called govulncheck advisories that \`go-vuln-fix\` will not patch automatically. Updated by the weekly run; never closed automatically."
+            echo
+            if [ -n "$STDLIB_IDS" ]; then
+              fixed=$(cut -f2 "$out/stdlib.tsv" | grep . | sed 's/^v//' | sort -V | tail -n 1 || true)
+              echo '### Go standard library / toolchain'
+              tr ',' '\n' <<< "$STDLIB_IDS" | while read -r id; do
+                echo "- [$id](https://pkg.go.dev/vuln/$id)"
+              done
+              if [ -n "$fixed" ]; then echo; echo "Fixed in \`go$fixed\`."; fi
+              echo
+            fi
+            if [ -n "$UNFIXABLE_IDS" ]; then
+              echo '### Module advisories without a fixed version'
+              sort -u "$out/unfixable.tsv" | while IFS=$'\t' read -r id module; do
+                echo "- [$id](https://pkg.go.dev/vuln/$id) in \`$module\`"
+              done
+              echo
+            fi
+            if [ "$ABORTED" = 'true' ]; then
+              echo '### Automatic fix aborted'
+              echo "\`\`\`"
+              cat "$out/abort.txt"
+              echo "\`\`\`"
+              echo
+            fi
+            echo "The \`go\` directive and the Dockerfiles are deliberately untouched. A toolchain bump needs go.mod, Dockerfile and dev.Dockerfile moved together by a human (see go-docker.yml)."
+          } > "$out/issue-body.md"
+
+          issues=$(gh issue list --repo "$REPO" --state open --json number,body --limit 200)
+          number=$(jq -r --arg m "$marker" '[.[] | select(.body | contains($m))][0].number // empty' <<< "$issues")
+          if [ -z "$number" ]; then
+            gh issue create --repo "$REPO" --title "$title" --body-file "$out/issue-body.md"
+            echo "action=issue-created" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          current=$(jq -r --arg n "$number" '.[] | select(.number == ($n | tonumber)) | .body' <<< "$issues" | tr -d '\r')
+          if [ "$current" = "$(cat "$out/issue-body.md")" ]; then
+            echo "action=issue-unchanged" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh issue edit "$number" --repo "$REPO" --body-file "$out/issue-body.md"
+          gh issue comment "$number" --repo "$REPO" --body "Advisory set changed: stdlib [${STDLIB_IDS:-none}], unfixable [${UNFIXABLE_IDS:-none}], aborted: $ABORTED. The issue body has been updated."
+          echo "action=issue-updated" >> "$GITHUB_OUTPUT"
+
+      - name: Record
+        if: always()
+        env:
+          REPO: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
+          IDS: ${{ steps.fix.outputs.ids }}
+          STDLIB_IDS: ${{ steps.fix.outputs.stdlib_ids }}
+          PR_ACTION: ${{ steps.pr.outputs.action }}
+          ISSUE_ACTION: ${{ steps.issue.outputs.action }}
+        run: |
+          set -euo pipefail
+          date_utc=$(date -u +%Y-%m-%d)
+          all_ids="${IDS:+$IDS}"
+          if [ -n "$STDLIB_IDS" ]; then all_ids="${all_ids:+$all_ids,}$STDLIB_IDS"; fi
+          all_ids="${all_ids:-none}"
+          if [ -n "$IDS" ] && [ -n "$STDLIB_IDS" ]; then kind=both
+          elif [ -n "$IDS" ]; then kind=module
+          elif [ -n "$STDLIB_IDS" ]; then kind=stdlib
+          else kind=none; fi
+          action="${PR_ACTION:-no-pr}"
+          if [ -n "$ISSUE_ACTION" ]; then action="$action+$ISSUE_ACTION"; fi
+          if [ "$JOB_STATUS" != 'success' ]; then action="failed"; fi
+          {
+            echo '### Go vuln fix'
+            echo
+            echo '| Date (UTC) | Repo | IDs | Kind | Action |'
+            echo '| --- | --- | --- | --- | --- |'
+            echo "| $date_utc | $REPO | $all_ids | $kind | $action |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=vuln-record::$date_utc $REPO $all_ids $action"
