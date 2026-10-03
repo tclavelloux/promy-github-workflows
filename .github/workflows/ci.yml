@@ -39,6 +39,44 @@ jobs:
       - name: Lint workflows
         run: actionlint -color
 
+      # Two duplications this repo cannot remove, so CI governs them instead:
+      #  1. govulncheck version. A reusable workflow cannot read its own private
+      #     repo's files at runtime, so go-vuln.yml and go-vuln-fix.yml each carry
+      #     the version as an input default; the hook reads .govulncheck-version.
+      #     Drift would make CI, the fix PR and the pre-push hook disagree on findings.
+      #  2. The fix logic. go-vuln-fix.yml inlines it (same private-repo limit);
+      #     scripts/go-vuln-fix.sh is its locally testable twin. A diverging twin
+      #     would make local tests prove nothing about what runs in CI.
+      - name: Check govulncheck pin and go-vuln-fix body sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          norm() { tr -d '[:space:]' | sed 's/^v//'; }
+          pin="$(norm < .govulncheck-version)"
+          vuln="$(yq '.on.workflow_call.inputs.govulncheck-version.default' .github/workflows/go-vuln.yml | norm)"
+          fix="$(yq '.on.workflow_call.inputs.govulncheck-version.default' .github/workflows/go-vuln-fix.yml | norm)"
+          echo ".govulncheck-version=$pin go-vuln.yml=$vuln go-vuln-fix.yml=$fix"
+          if [ "$pin" != "$vuln" ]; then
+            echo "::error file=.github/workflows/go-vuln.yml::govulncheck default ($vuln) != .govulncheck-version ($pin)"
+            exit 1
+          fi
+          if [ "$pin" != "$fix" ]; then
+            echo "::error file=.github/workflows/go-vuln-fix.yml::govulncheck default ($fix) != .govulncheck-version ($pin)"
+            exit 1
+          fi
+
+          between() { sed -n '/# >>> go-vuln-fix body/,/# <<< go-vuln-fix body/p'; }
+          between < scripts/go-vuln-fix.sh > /tmp/body-script.txt
+          between < .github/workflows/go-vuln-fix.yml | sed 's/^          //' > /tmp/body-workflow.txt
+          if [ ! -s /tmp/body-script.txt ] || [ ! -s /tmp/body-workflow.txt ]; then
+            echo "::error file=scripts/go-vuln-fix.sh::go-vuln-fix body markers missing in the script or the workflow"
+            exit 1
+          fi
+          if ! diff -u /tmp/body-script.txt /tmp/body-workflow.txt; then
+            echo "::error file=.github/workflows/go-vuln-fix.yml::inlined body differs from scripts/go-vuln-fix.sh"
+            exit 1
+          fi
+
   # zizmor audits the same workflows for security anti-patterns actionlint doesn't
   # check: unpinned action refs, credential persistence, template-injection, etc.
   # Same fleet-wide blast radius as actionlint, so it gets the same treatment.

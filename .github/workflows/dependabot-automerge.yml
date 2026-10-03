@@ -1,0 +1,251 @@
+name: Dependabot Automerge
+
+# Squash-merges a Dependabot Go-module PR once every check on its head commit is
+# green. Patch/minor only; majors, GitHub Actions bumps and anything not authored
+# solely by dependabot[bot] are left for a human.
+#
+# Call it as the LAST job of the caller's own ci.yml (`on: pull_request`), with
+# `needs:` listing every other job. See templates/ci-automerge-job.yml.
+# Why not a standalone trigger:
+#   - pull_request_target: write token in a context that sees PR content
+#     (zizmor dangerous-triggers); not needed here.
+#   - workflow_run: also dangerous-triggers; fetch-metadata reads only
+#     pull_request payloads and would report "not from Dependabot".
+#   - check_suite: never fires for suites created by GitHub Actions.
+#
+# GITHUB_TOKEN consequence: the squash commit is pushed by GITHUB_TOKEN, so it
+# starts no workflows. release-please's `push: main` run does not fire until the
+# next human merge. Nothing is lost: release-please scans every commit since the
+# last release, and build(deps) commits are non-releasing.
+
+on:
+  workflow_call:
+    inputs:
+      merge-update-types:
+        description: Space-separated allowlist of dependabot/fetch-metadata `update-type` values that may be merged. `version-update:semver-major` is rejected in the script even if listed here.
+        required: false
+        type: string
+        default: version-update:semver-patch version-update:semver-minor
+      wait-attempts:
+        description: Max polls for check runs outside this workflow run (e.g. pr-title.yml) to complete before giving up without merging.
+        required: false
+        type: number
+        default: 10
+      wait-seconds:
+        description: Seconds to sleep between polls.
+        required: false
+        type: number
+        default: 15
+
+# The caller's automerge job must grant exactly these: a called workflow can
+# only narrow the caller's permissions, never widen them.
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+  statuses: read
+
+jobs:
+  automerge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    # Same-repo Dependabot branches only. A fork PR can spoof neither the user
+    # login nor a head repo equal to this one.
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.user.login == 'dependabot[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && startsWith(github.event.pull_request.head.ref, 'dependabot/')
+    steps:
+      # No checkout: the workflow never touches the caller's tree, so there is
+      # nothing to check out and no credential to persist.
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide
+        id: decide
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          ALLOWED: ${{ inputs.merge-update-types }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Every rejection exits 0: a red check would only duplicate the real failure.
+          reject() {
+            echo "::notice title=Not auto-merging::$1"
+            {
+              echo "merge=false"
+              echo "reason=$1"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # Belt and braces: the job `if:` already requires a dependabot/ head ref.
+          case "$HEAD_REF" in
+            release-please--*) reject "release-please branches are never auto-merged" ;;
+          esac
+
+          # Hard-reject majors even if a caller put them in the allowlist.
+          if [ -z "$UPDATE_TYPE" ]; then
+            reject "fetch-metadata reported no update-type"
+          fi
+          if [ "$UPDATE_TYPE" = "version-update:semver-major" ]; then
+            reject "major updates need a human review"
+          fi
+          permitted=false
+          for t in $ALLOWED; do
+            if [ "$t" = "$UPDATE_TYPE" ]; then permitted=true; fi
+          done
+          if [ "$permitted" != "true" ]; then
+            reject "update-type '$UPDATE_TYPE' is not in the allowlist '$ALLOWED'"
+          fi
+
+          # fetch-metadata derives the ecosystem from the branch name
+          # (dependabot/<ecosystem>/...): `go_modules` for Go, `github_actions`
+          # for workflow bumps.
+          if [ "$ECOSYSTEM" = "github_actions" ]; then
+            reject "github-actions updates need a human merge: GITHUB_TOKEN cannot merge workflow-file changes"
+          fi
+          if [ "$ECOSYSTEM" != "go_modules" ]; then
+            reject "package-ecosystem '$ECOSYSTEM' is not go_modules"
+          fi
+
+          # fetch-metadata only verifies the first commit; a human could push
+          # more commits onto the branch afterwards. A null author prints "null".
+          mapfile -t authors < <(gh api "repos/$REPO/pulls/$PR_NUMBER/commits" --paginate -q '.[].author.login')
+          if [ "${#authors[@]}" -eq 0 ]; then
+            reject "PR has no commits to verify"
+          fi
+          for a in "${authors[@]}"; do
+            if [ "$a" != "dependabot[bot]" ]; then
+              reject "PR contains a commit not authored by dependabot[bot] (author: $a)"
+            fi
+          done
+
+          {
+            echo "merge=true"
+            echo "reason=$UPDATE_TYPE on go_modules, all commits by dependabot[bot]"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify checks
+        id: verify
+        if: steps.decide.outputs.merge == 'true'
+        env:
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          WAIT_ATTEMPTS: ${{ inputs.wait-attempts }}
+          WAIT_SECONDS: ${{ inputs.wait-seconds }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Non-merge outcomes exit 0 for the same reason as in Decide.
+          stop() {
+            echo "::notice title=Not auto-merging::$1"
+            {
+              echo "ok=false"
+              echo "reason=$1"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # The caller's `needs:` is the primary gate; this is the backstop for
+          # check runs outside this workflow run (pr-title.yml, a job missing
+          # from `needs:`). This job must exclude itself: it is in_progress.
+          # A job's id equals its check-run id. runner_name pins our own job
+          # among the other in-progress jobs of the run.
+          own_id="$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --paginate \
+            --jq '.jobs[] | select(.status == "in_progress" and .runner_name == env.RUNNER_NAME) | .id')"
+          if [ "$(printf '%s\n' "$own_id" | grep -c .)" -ne 1 ]; then
+            stop "could not identify this job's own check run exactly once; failing closed"
+          fi
+
+          for ((i = 1; i <= WAIT_ATTEMPTS; i++)); do
+            runs="$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?filter=latest&per_page=100" --paginate --jq '.check_runs[]' \
+              | jq -s --argjson own "$own_id" '[.[] | select(.id != $own)]')"
+
+            failed="$(jq -r '[.[] | select(.status == "completed" and (.conclusion | IN("success", "neutral", "skipped") | not)) | .name] | join(", ")' <<< "$runs")"
+            if [ -n "$failed" ]; then
+              stop "check runs not green: $failed"
+            fi
+
+            pending="$(jq -r '[.[] | select(.status != "completed") | .name] | length' <<< "$runs")"
+            if [ "$pending" -eq 0 ]; then
+              # Legacy commit statuses. GitHub reports `pending` when there are none.
+              status="$(gh api "repos/$REPO/commits/$HEAD_SHA/status" --jq '[.state, .total_count] | @tsv')"
+              state="${status%%$'\t'*}"
+              total="${status##*$'\t'}"
+              if [ "$state" = "success" ] || { [ "$state" = "pending" ] && [ "$total" -eq 0 ]; }; then
+                {
+                  echo "ok=true"
+                  echo "reason=all check runs and commit statuses green"
+                } >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              stop "commit status is '$state' with $total statuses"
+            fi
+
+            echo "Attempt $i/$WAIT_ATTEMPTS: $pending check run(s) still running"
+            if [ "$i" -lt "$WAIT_ATTEMPTS" ]; then sleep "$WAIT_SECONDS"; fi
+          done
+
+          stop "checks still running after ${WAIT_ATTEMPTS}x${WAIT_SECONDS}s; not merging (next Dependabot rebase re-runs CI)"
+
+      - name: Merge
+        id: merge
+        if: steps.decide.outputs.merge == 'true' && steps.verify.outputs.ok == 'true'
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --match-head-commit refuses the merge if the branch moved after the
+        # checks above ran (e.g. a Dependabot rebase or a human push).
+        run: gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --match-head-commit "$HEAD_SHA"
+
+      - name: Summary
+        if: always()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEPENDENCIES: ${{ steps.meta.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          DECIDE_MERGE: ${{ steps.decide.outputs.merge }}
+          DECIDE_REASON: ${{ steps.decide.outputs.reason }}
+          VERIFY_OK: ${{ steps.verify.outputs.ok }}
+          VERIFY_REASON: ${{ steps.verify.outputs.reason }}
+          MERGE_OUTCOME: ${{ steps.merge.outcome }}
+        run: |
+          reason="$DECIDE_REASON"
+          if [ "$MERGE_OUTCOME" = "success" ]; then
+            decision="merged"
+          elif [ "$MERGE_OUTCOME" = "failure" ]; then
+            decision="merge failed"
+          elif [ "$DECIDE_MERGE" = "true" ] && [ -n "$VERIFY_REASON" ]; then
+            decision="not merged"
+            reason="$VERIFY_REASON"
+          elif [ "$DECIDE_MERGE" = "false" ]; then
+            decision="not merged"
+          else
+            decision="not evaluated (earlier step failed)"
+          fi
+          {
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| PR | #$PR_NUMBER |"
+            echo "| Dependencies | ${DEPENDENCIES:--} |"
+            echo "| Update type | ${UPDATE_TYPE:--} |"
+            echo "| Ecosystem | ${ECOSYSTEM:--} |"
+            echo "| Decision | $decision |"
+            echo "| Reason | ${reason:--} |"
+          } >> "$GITHUB_STEP_SUMMARY"
