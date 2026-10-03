@@ -1,0 +1,6 @@
+# Pin rev to the immutable tag (hooks/vX.Y.Z), never the moving `hooks/v1`.
+  - repo: https://github.com/tclavelloux/promy-github-workflows
+    rev: hooks/v1.1.0
+    hooks:
+      - id: no-direct-commit-to-main
+      - id: go-vuln

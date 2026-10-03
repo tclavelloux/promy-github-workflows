@@ -6,3 +6,12 @@
   always_run: true
   pass_filenames: false
   stages: [pre-commit]
+- id: go-vuln
+  name: govulncheck (blocks only when go.mod/go.sum change)
+  description: Runs the fleet-pinned govulncheck with CI's Go toolchain; blocks a push only when it changes go.mod/go.sum, otherwise warns.
+  entry: hooks/go-vuln.sh
+  language: script
+  always_run: true
+  pass_filenames: false
+  require_serial: true
+  stages: [pre-push, manual]
