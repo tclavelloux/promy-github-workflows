@@ -85,6 +85,17 @@ func (c *checker) loadYAML(rel string) *parsed {
 		c.add(rel, yamlErrorLine(err), ruleYAMLParse, "invalid YAML: %s; fix the syntax so the other rules can run", msg)
 		return p
 	}
+	// Every governed file is a YAML mapping. A file that exists but is empty,
+	// comment-only or a bare scalar/list would otherwise make each rule's
+	// `root == nil` early return pass silently and drop that file's gate.
+	if root == nil || root.Kind != yaml.MappingNode {
+		line := 1
+		if root != nil {
+			line = root.Line
+		}
+		c.add(rel, line, ruleYAMLParse, "file is empty or not a YAML mapping; a governed file with no content silently drops its gate, restore it or delete it")
+		return p
+	}
 	p.root = root
 	c.duplicateKeys(rel, root)
 	return p

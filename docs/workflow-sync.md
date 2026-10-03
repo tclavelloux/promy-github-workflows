@@ -90,7 +90,7 @@ Source of truth: `internal/syncheck/policy.go` and the `register(...)` calls in 
 
 | Rule | Meaning |
 |---|---|
-| `yaml-parse` | A checked YAML file does not parse |
+| `yaml-parse` | A checked YAML file does not parse, has duplicate keys, or exists but is empty, comment-only or not a mapping (which would otherwise drop its gate silently) |
 | `bad-exemption` | Marker with no rule, unknown rule, no reason, or naming `bad-exemption` / `stale-exemption`. Not exemptable |
 | `stale-exemption` | Marker that suppressed nothing. Not exemptable |
 

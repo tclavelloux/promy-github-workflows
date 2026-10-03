@@ -120,6 +120,12 @@ func TestDrift(t *testing.T) {
 		{name: "vuln-fix cancel", base: "pass-rollout", edits: []edit{ed(vfRel, "cancel-in-progress: false", "cancel-in-progress: true")}, rules: []string{"vuln-fix"}, msg: "cancel-in-progress"},
 		{name: "vuln-fix push trigger", base: "pass-rollout", edits: []edit{ed(vfRel, "  workflow_dispatch:", "  workflow_dispatch:\n  push:")}, rules: []string{"vuln-fix"}, msg: "schedule"},
 		{name: "malformed yaml", do: func(t *testing.T, r string) { appendFile(t, r, ciRel, "\n  bad: [unclosed\n") }, rules: []string{"yaml-parse"}, msg: "invalid YAML"},
+		// A governed file that exists but holds no mapping drops its gate silently unless flagged.
+		{name: "pr-title.yml empty", do: func(t *testing.T, r string) { writeFile(t, r, prRel, "") }, rules: []string{"yaml-parse"}, msg: "empty or not a YAML mapping"},
+		{name: "dependabot.yml comment only", do: func(t *testing.T, r string) { writeFile(t, r, depRel, "# nothing here\n") }, rules: []string{"yaml-parse"}, msg: "empty or not a YAML mapping"},
+		{name: "ci.yml empty", do: func(t *testing.T, r string) { writeFile(t, r, ciRel, "") }, rules: []string{"yaml-parse"}, msg: "empty or not a YAML mapping"},
+		{name: "release-please.yml scalar root", do: func(t *testing.T, r string) { writeFile(t, r, rpRel, "just a string\n") }, rules: []string{"yaml-parse"}, msg: "empty or not a YAML mapping"},
+		{name: "pre-commit config empty", do: func(t *testing.T, r string) { writeFile(t, r, ".pre-commit-config.yaml", "") }, rules: []string{"yaml-parse"}, msg: "empty or not a YAML mapping"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
