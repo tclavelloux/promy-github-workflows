@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/go-lint.yml@go-lint/v1
+
+  vuln:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/go-vuln.yml@go-vuln/v1
+
+  # List EVERY other job in `needs:`. The in-workflow check-run verification is
+  # the backstop, not the primary gate.
+  automerge:
+    needs: [lint, vuln]
+    # No status function here, so GitHub implicitly ANDs success(): any failed,
+    # cancelled or skipped need skips this job.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    # Must match the reusable workflow's permissions exactly; it can only narrow.
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      actions: read
+      statuses: read
+    uses: tclavelloux/promy-github-workflows/.github/workflows/dependabot-automerge.yml@dependabot-automerge/v1
