@@ -4,7 +4,7 @@
 
 - 2026-10-03 outage: two `// indirect` modules (otel sdk/otlptrace GO-2026-6505, grpc GO-2026-6348) failed every `vuln` job. `dependency-type: direct` never bumps them.
 - Zero Dependabot PRs have ever merged; ~9-10 are open per repo (re-counted 2026-10-03). Each rewrites `go.sum`, so ungrouped they merge only one at a time.
-- No branch protection: free private plan, `gh api .../branches/main/protection` returns 403.
+- Branch protection: ruleset `protect-main` on all seven repos since 2026-10-04 (issue #27). Required checks include `lint / lint`, which carries `workflow-sync`. Bypass is the Admin role only.
 - No PAT, by choice. Everything runs on `GITHUB_TOKEN`.
 
 ## Pieces
@@ -43,7 +43,7 @@ All tags are cut: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hook
 - No-PAT alternatives evaluated:
   - `workflow_dispatch` exception: rejected. With no PR payload, the draft check `github.event.pull_request.draft == false` evaluates false and skips every job, and coverage's PR comment breaks.
   - Dependabot security updates: PRs do trigger CI. Vulnerability alerts and automated security fixes are enabled in all six repos (verified via API 2026-10-03; `scripts/check-repo-settings.sh` re-checks). The `gomod-security` group is in the template.
-- Nothing enforces required checks server-side. Automerge's own check-run verification is the only gate.
+- Required checks are enforced server-side by `protect-main`, in addition to automerge's own check-run verification. `automerge` itself is not a required check. Release-please, vuln-fix and `[skip ci]` PRs report no checks and need `gh pr merge --admin`.
 - promy-event-bus and the governance repo are both public (verified). Visibility is not the constraint: reusable workflows are referenced, not checked out, and a reusable workflow cannot see its own pinned ref to fetch sibling files.
 - Closing a vuln-fix PR without merging is permanent for that advisory set: the same `fix/vuln-<hash>` branch is never reopened. A new advisory changes the hash and opens a fresh PR.
 - `cooldown: 3` delays version updates, not security updates; a fix released < 3 days ago reaches the weekly group PR one week later. go-vuln-fix does not honour cooldown.

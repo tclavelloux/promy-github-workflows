@@ -63,7 +63,7 @@ Source of truth: `internal/syncheck/policy.go` and the `register(...)` calls in 
 | Rule | Invariant | Why |
 |---|---|---|
 | `precommit-install-types` | `default_install_hook_types` = {pre-commit, commit-msg, pre-push} | One `pre-commit install` wires every stage |
-| `precommit-governance-repo` | Exactly one entry for `https://github.com/tclavelloux/promy-github-workflows`; `rev` matches `^hooks/v\d+\.\d+\.\d+$`; hooks include `no-direct-commit-to-main` and `workflow-sync` | Immutable rev; the branch guard is the only main protection on the free plan |
+| `precommit-governance-repo` | Exactly one entry for `https://github.com/tclavelloux/promy-github-workflows`; `rev` matches `^hooks/v\d+\.\d+\.\d+$`; hooks include `no-direct-commit-to-main` and `workflow-sync` | Immutable rev; the branch guard is early local feedback; the server-side ruleset is the enforcement |
 | `precommit-rev` | No repo `rev` is `main`, `master` or `HEAD` | pre-commit never re-resolves a moving rev |
 | `precommit-coverage-hook` | Local hook `check-coverage`: entry `make check-coverage`, `language: system`, `pass_filenames: false`, `always_run: true`, `stages: [pre-push]` | Local coverage gate matches CI |
 | `precommit-no-test-hook` | No hook id `test`; no pre-push hook other than `check-coverage` whose entry contains `go test` or `make test` | CI owns the test run; `check-coverage` already runs the suite once |
@@ -124,7 +124,7 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
 
 ## Limits
 
-- Cannot block a human merge in the five private repos. Free plan, no branch protection (`gh api .../branches/main/protection` returns 403). Red `lint` blocks only `automerge`, via `needs: lint`. promy-event-bus is public (API returns 404 `Branch not protected`), so a ruleset requiring `lint` can make it blocking there.
+- Blocks a human merge only through the `protect-main` ruleset, which requires `lint / lint` (it carries `workflow-sync`) on the six service/library repos and `workflow-sync` on this repo. The Admin role bypasses it, and a `[skip ci]` PR reports no checks, so an admin can merge past a red or missing check.
 - Cannot stop `SKIP=workflow-sync` or `--no-verify` locally. CI still runs the step when the caller wired `workflow-sync: true`.
 - Cannot stop a caller pinning an old `rev:`. The old policy passes; visible in review only. The `ci-lint-sync` and `precommit-governance-repo` rules need the caller to be on a rev that has them.
 - Cannot stop a caller dropping `with: workflow-sync: true`: `ci-lint-sync` catches it only when the local hook runs.
