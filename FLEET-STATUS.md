@@ -1,8 +1,8 @@
 # promy fleet CI/security — status and resume plan
 
-Updated **2026-10-03**. C3 and Phase F are done. Phase D is built, not rolled out.
+Updated **2026-10-04**. C3, Phase F and Phase D are done. Dependency and vuln automation is live in five repos (crm pending). Open: the crm#36 blocker, Dependabot triage, Phase E.
 
-This document is self-contained. A fresh session should be able to resume from it without prior context. `PHASE-F-PROMPT.md` in this repo is now historical (Phase F is done).
+This document is self-contained. A fresh session should be able to resume from it without prior context. Its resume prompt is `NEXT-SESSION-PROMPT.md`; `PHASE-F-PROMPT.md` is historical (Phase F is done).
 
 **Scope:** six Go repos — `promy-template-go` (scaffold), `promy-crm`, `promy-event-bus` (library), `promy-identifier`, `promy-product`, `promy-user` — plus this governance repo, which holds every reusable workflow and shared hook. `promy-frontend` (Flutter) and `promy-market-catalog` (Python) are out of scope except where noted.
 
@@ -10,41 +10,37 @@ The work began as a `ci.yml` audit. It found a live coverage-gate hole, then rea
 
 ---
 
-## 1. STOP — read before interpreting any red check
+## 1. Read before interpreting any red check
 
-**GitHub Actions had no remaining budget when this paused.** Jobs fail at startup with:
-
-> The job was not started because recent account payments have failed or your spending limit needs to be increased.
-
-This presents as a **2-second failed job with no runner assigned and zero steps** — easily mistaken for a broken change. Confirm the budget has reset before reading any failure as real.
-
-While constrained, push with `[skip ci]` on its own line in the **commit body**. Never in the PR title: under squash-merge the title becomes the commit on `main` and is the only thing release-please parses. `ci.yml` no longer triggers on `push: main`, so merging costs nothing — only PR runs consume minutes.
+- **The Actions budget reset on 2026-10-03**; normal CI verification applies again.
+- **Billing signature (if it ever recurs):** a **2-second failed job with `runner_id` 0 and zero steps** is a billing failure, not a broken change (message: "recent account payments have failed or your spending limit needs to be increased"). Confirm before reading any failure as real.
+- **Time of day matters for promy-crm:** its tests fail between 22:00 and 08:00 (wall clock; UTC in CI). A red crm `test` at night is crm#36, not your change. See §2.
+- **`[skip ci]` rule:** docs-only PRs carry `[skip ci]` on its own line in the **commit body**, never in the PR title (under squash-merge the title becomes the commit on `main` and is the only thing release-please parses). A PR that changes workflows, Makefiles or code runs CI. `ci.yml` has no `push: main` trigger, so merging costs nothing.
 
 ---
 
+
 ## 2. Current state
 
-Verified 2026-10-03.
+Verified 2026-10-04.
 
-- **DONE — C3, all six repos:**
-  - `default_install_hook_types: [pre-commit, commit-msg, pre-push]`
-  - shared `no-direct-commit-to-main` at `rev: hooks/v1.0.0`
-  - `check-coverage` with `always_run: true`, `stages: [pre-push]`
-  - no duplicate `test` pre-push hook
-  - Makefile `setup:` = `pre-commit install --install-hooks`
-  - no `.githooks/`; `core.hooksPath` unset
-- **DONE — Phase F docs alignment.**
-- **DONE — fleet dependency bump** for GO-2026-6505 (otel sdk/otlptrace) and GO-2026-6348 (grpc).
-- **DONE — go-test-coverage pinned** in all six Makefiles to v2.19.0 (matches `go-coverage.yml`'s SHA-pinned `vladopajic/go-test-coverage` v2.19.0); previously `@latest`.
-- **DONE — release guide deleted.**
-- **DONE — repo settings in all six** (verified via `scripts/check-repo-settings.sh`): Actions default token `read`, Actions may create PRs, squash-merge only, vulnerability alerts on, automated security fixes on.
-- **BUILT, TAGGED, NOT ROLLED OUT:** `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.1.0` (go-vuln hook), `templates/dependabot.yml` (grouped). Per-repo steps: `docs/dependency-automation.md` §Rollout.
-- **BUILT, NOT MERGED/TAGGED:** Phase D `workflow-sync` (branch `feat/workflow-sync-check`). Tags to cut: `hooks/v1.2.0`, `go-lint/v1.2.0` + move `go-lint/v1`.
+- **DONE:** C3 (all six), Phase F docs alignment, fleet bump for GO-2026-6505 / GO-2026-6348, go-test-coverage pinned to v2.19.0 in all six Makefiles, release guide deleted, PR-scope rule written (one PR = one business purpose; in the fleet docs and the maintainer's user-level CLAUDE.md).
+- **DONE — Phase D `workflow-sync`:** merged (#24); tags `hooks/v1.2.0`, `go-lint/v1.2.0`, `go-lint/v1` moved. Wired in all six: template-go #41, identifier #58, crm #68, product #106, user #91, event-bus #53. Proven on Actions: event-bus's wiring-only commit turned `lint` red with exactly the four known `registry.yaml` findings; the next commit (hardened `registry.yaml`) turned it green.
+- **DONE — dependency and vuln automation** (grouped Dependabot, `automerge` as last `ci.yml` job, `vuln-fix.yml`, `go-vuln` hook, `make vuln`): merged in event-bus #55, identifier #60, product #107, user #93, template-go #43. **crm: PR #69 open** (see the blocker).
+- **DONE — branch protection** on the two public repos (`promy-github-workflows`, `promy-event-bus`): ruleset `protect-main`, active on the default branch: PR required (0 approvals), no force-push, no deletion, required checks, bypass = repository Admin role only. Governance requires `actionlint`, `zizmor`; event-bus requires `lint / lint`, `vuln / vuln`, `test`, `coverage / coverage`, `gitleaks`, `pr-title / pr-title`. The five private repos cannot be protected (403 on the free plan).
+  - A `[skip ci]` PR reports no checks, so it cannot satisfy the required checks: merge it with `gh pr merge --admin`. Release-please PRs and any `GITHUB_TOKEN`-created PR behave the same.
+  - `workflow-sync` is deliberately not required yet; add it after a few green runs.
+- **Proven on Actions:** `workflow-sync` red then green; the hardened `registry.yaml` (pinned yq, sha256 verified); a manual `Vuln fix` run on event-bus (`vuln-record: 2026-10-03 tclavelloux/promy-event-bus none no-pr`).
+- **Dependabot "Check for updates"** was triggered 2026-10-04 by the maintainer for product, user, identifier, event-bus and template-go. NOT crm.
+- **BLOCKER — promy-crm tests depend on the wall clock (crm#36).** Seed `pref_user_001` has quiet hours 22:00–08:00 and `internal/domain/message/service.go:238` rejects message creation with 409 inside them (`IsInQuietHours(time.Now())`, which also ignores `Timezone`). The local pre-push gate and CI `test` both fail between 22:00 and 08:00 (CI runs UTC, i.e. 00:00–10:00 Paris). Dependabot's Monday 05:00 Paris run is 03:00 UTC, inside the window: crm's grouped PR cannot pass `test`, so `automerge` cannot merge crm bumps until #36 is fixed.
 - **Remaining, in order:**
-  1. Merge D.
-  2. One PR per repo combining dependency automation + workflow-sync at `rev: hooks/v1.2.0` (order: event-bus, template-go, identifier, crm, product, user).
-  3. Dependabot triage.
-  4. Phase E.
+  1. crm #69: its `test` job fails while UTC is 22:00–08:00. Re-run all jobs after 08:00 UTC (`gh run rerun <id>` without `--failed`), merge when green.
+  2. Fix crm#36 as its own PR: inject a clock, honour the `Timezone` field, stop depending on seeded 22:00–08:00 windows in tests.
+  3. Then trigger crm's "Check for updates" (UI: Insights → Dependency graph → Dependabot).
+  4. Dependabot triage: after each grouped PR opens, close the superseded individual minor/patch PRs with a `@dependabot close` comment; leave majors and release-please PRs. Watch the first grouped PR's `automerge` job summary.
+  5. Make each `automerge` gate fail once: a failing check, a major bump, a human commit pushed onto a Dependabot branch, a `github-actions` PR.
+  6. Phase E.
+  7. Optional follow-ups: §6 D and §7.
 
 ---
 
@@ -115,7 +111,11 @@ Docker validation was promoted from Phase C after `promy-crm`'s Railway deploy f
   - `ci.yml` guard keeping `.govulncheck-version`, `go-vuln.yml`, `go-vuln-fix.yml` and the fix body in sync
 - go-test-coverage pins (v2.19.0) in all six Makefiles.
 - Release guide removed.
-- Phase D built (see §6).
+- Phase D `workflow-sync` merged, tagged and wired in all six (see §6).
+- Dependency and vuln automation rolled out to five repos (crm pending, see §2).
+- Branch protection (`protect-main`) on the two public repos.
+- Wording: one PR per business purpose (README of template-go, HOWTO of user/identifier/template-go, §8, user-level CLAUDE.md).
+- event-bus `registry.yaml` hardened (SHA-pinned checkout, `persist-credentials: false`, `permissions: contents: read`, yq v4.54.1 verified by sha256); `events:subscriptions` owner fixed to `promy-subscription`; event-bus `CLAUDE.md` event contract / DLQ / new-event steps corrected.
 
 ---
 
@@ -156,13 +156,33 @@ A moving tag warns on every invocation and freezes each developer at whatever co
 - For an absent key, the finding reports the parent key (e.g. `gitleaks:`).
 - A marker placed below it is reported as `stale-exemption`.
 
+**crm tests are wall-clock dependent.** See §2 blocker: quiet hours 22:00–08:00 make `TestDeleteCommunicationHandler` (and any test creating a message for `user_001`) return 409. The pre-push `check-coverage` hook blocks the push with `error: failed to push some refs` and no reason: read the hook output above it. Do not bypass with `--no-verify`.
+
+**`[skip ci]` in the HEAD commit suppresses every workflow of a PR**, including the one you are trying to prove. Any occurrence of the text counts, even in a message that only talks about it (a commit explaining the problem re-suppressed its own checks). A throwaway validation PR must not carry it. On protected repos a `[skip ci]` PR reports no checks and needs `gh pr merge --admin`.
+
+**Never require a path-filtered check.** event-bus `validate` (registry) runs only on `registry/**` PRs; as a required check it would block everything else.
+
+**`GITHUB_TOKEN`-created PRs and merges start no workflows**: vuln-fix PRs have no CI until closed and reopened; an automerge squash does not fire release-please.
+
+**Reusable-workflow logs have no step names** (all `UNKNOWN STEP`) and `::notice` output lives in the check-run annotations (`gh api repos/<r>/check-runs/<job>/annotations`), not in `gh run view --log`.
+
+**Concurrent pre-push hooks race on `~/go/bin/go-test-coverage`.** Serialise pushes (a `mkdir`-lock around push + `gh pr create` worked) and run them in the background: each hook runs the full race suite and takes minutes.
+
+**The checker accepts only the moving major (`go-lint/v1`) for workflows and an immutable `hooks/vX.Y.Z` for hooks.** Validating through `go-lint/v1.2.0` or a SHA rev adds noise violations.
+
+**Sonnet subagents:** one returned only "placeholder", others overstated what they ran, invented a rationale, claimed a section was absent when it was present, or applied a bash-only recipe wrongly. Verify mechanically: byte-compare with templates, token-diff an old README against the new one, re-run the checker, read the real diff.
+
+**zsh and macOS:** unquoted variables do not word-split (`git add $files`, `for x in $list`); `?` and `*` in URLs/paths glob; no `grep -P`; BSD `sed -i` needs a suffix; awk quoting differs. Branch names containing `/` create nested worktree directories (use flat worktree paths). `git add -- <already-staged deleted path>` errors "pathspec did not match" and, chained with `&&`, silently skips the commit: print the index before committing.
+
+**IDE diagnostics such as "could not import" / "undefined" in scratch worktrees are gopls workspace noise**: trust `go build` / `go vet` / `go test`.
+
 ---
 
-## 6. Remaining phases — D rollout, then E
+## 6. Remaining phases — D follow-ups, then E
 
 ### F — done (2026-10)
 
-### D — `workflow-sync` (built, not merged)
+### D — `workflow-sync` (DONE; verification partial)
 
 Every drift this session began with was a documented guarantee with nothing enforcing it. `workflow-sync` checks each repo against a policy kept in this repo.
 
@@ -184,14 +204,12 @@ Every drift this session began with was a documented guarantee with nothing enfo
   - `SKIP=` / `--no-verify` bypass locally.
   - A caller pinning an old rev runs the old policy.
 - **Motivating example (unpinned-tool class):** Makefiles installed go-test-coverage `@latest` while CI ran v2.19.0, so local and CI could measure coverage differently with no diff. Now caught by `make-coverage-pin` + `unpinned-tool`.
-- **Result against `origin/main` of all six (before rollout):**
-  - Every repo fails only the two rollout-wiring rules: `ci-lint-sync` and `precommit-governance-repo` ("no hook workflow-sync").
-  - `promy-event-bus` additionally fails 4 rules on `.github/workflows/registry.yaml` (see §7).
-- **Rollout:** `docs/workflow-sync.md` §Rollout.
-  - Tag `hooks/v1.2.0`; never move `hooks/v1.0.0` or `hooks/v1.1.0`.
-  - Tag `go-lint/v1.2.0` and move `go-lint/v1`.
-  - Deliberate failure to run: event-bus wiring pushed before the `registry.yaml` fix must turn `lint` red.
-- **Follow-up, NOT done:** run all hygiene hooks in CI (`pre-commit run --all-files`). Not wired. Expect existing files to fail `trailing-whitespace` / `end-of-file-fixer` first.
+- **Rollout: done 2026-10-04.** `hooks/v1.2.0` and `go-lint/v1.2.0` cut, `go-lint/v1` moved (the only change to `go-lint.yml` since the old alias was the additive input, a no-op when off). Every repo's `.pre-commit-config.yaml` carries `rev: hooks/v1.2.0` with `workflow-sync` and `go-vuln`, and its `lint` job sets `with: workflow-sync: true`.
+- **Still open for D:**
+  - Add `workflow-sync` as a required check on the two rulesets once it has a few green runs.
+  - Run all hygiene hooks in CI (`pre-commit run --all-files`): not wired; expect existing files to fail `trailing-whitespace` / `end-of-file-fixer` first.
+  - `make vuln` fails while `.pre-commit-config.yaml` has unstaged edits (pre-commit refuses to run). Adding `--all-files` fixes it but the policy pins the recipe (`VulnRecipe`), so it needs a policy edit plus a new hook release (`hooks/v1.3.0`).
+  - The `automerge` gate has never merged a real Dependabot PR; see §2 step 5.
 
 ### E — `promy-market-catalog`
 
@@ -221,29 +239,27 @@ CI cannot be added until a manifest exists — there is nothing to install from.
   - **#1** — go-lint: centralise
 
 **Dependabot**
-- 51 open PRs on 2026-10-03: template-go 9, crm 10, product 9, user 11, event-bus 3, identifier 9. None merged.
-- Alerts and security updates are now on in all six.
-- Automation rollout pending (`docs/dependency-automation.md`). After it, close the superseded individual PRs once the grouped PR opens.
-- `groups:` exist in `templates/dependabot.yml`; not yet copied to any repo.
-- Pre-rollout rule only: merge Go module bumps one at a time per repo — each rewrites `go.sum`, conflicting the rest until rebase.
+- 51 open PRs on 2026-10-03 (template-go 9, crm 10, product 9, user 11, event-bus 3, identifier 9); none merged ever. Recount before triage.
+- Alerts and security updates are on in all six. The grouped `templates/dependabot.yml` is now in five repos (crm pending).
+- Pre-grouping rule only: merge Go module bumps one at a time per repo — each rewrites `go.sum`, conflicting the rest until rebase.
 - 6 × `gitleaks-action` v2→v3 and ~2 × `release-please-action` v4→v5 deferred — majors needing caller validation, not a green check. `gitleaks-action` v2 required `GITLEAKS_LICENSE` for organisations; if v3 changed that, a green run on a personal repo proves nothing.
 
 **Findings (2026-10-03)**
-- **`promy-event-bus` `.github/workflows/registry.yaml`** is a supply-chain gap:
-  - `actions/checkout@v4` moving tag (every other fleet workflow is SHA-pinned).
-  - No `persist-credentials: false`.
-  - No top-level `permissions:`.
-  - Downloads `yq` from `releases/latest` with no checksum.
-  - workflow-sync flags all four: `sha-pin`, `persist-credentials`, `workflow-permissions`, `unpinned-tool`.
-  - Fix in event-bus's rollout PR: SHA-pin checkout with version comment, `persist-credentials: false`, `permissions: {contents: read}`, pin yq to an exact release and verify sha256.
+- **`promy-event-bus` `registry.yaml` supply-chain gap: RESOLVED** (event-bus #53; see §2).
 - **`promy-template-go` `release_please/`** holds a second `release-please-config.json` and `.release-please-manifest.json` that differ from the root copies:
   - `package-name: TEMPLATE_PACKAGE_NAME` vs `promy-template-go`.
   - No `include-component-in-tag`.
   - Manifest `0.2.0` vs root `0.1.0`.
   - Nothing in the repo references the directory.
   - Unexplained. Decide: keep (scaffold placeholder) or delete.
-- **The two public repos can be protected server-side and are not.** `gh api repos/tclavelloux/{promy-event-bus,promy-github-workflows}/branches/main/protection` returns `404 Branch not protected`, not the private repos' `403 Upgrade to GitHub Pro`. A ruleset requiring the `lint` check (and so `workflow-sync`) on `main` is available for these two today. Not done.
+- **The two public repos can be protected server-side: DONE** (`protect-main` rulesets, §2).
 - **Hooks without explicit `stages:` run twice per commit** (pre-commit and commit-msg). `gitleaks` genuinely runs twice. Fix is `default_stages: [pre-commit]`.
+
+- **`promy-identifier` Makefile `rename` target** substitutes `github.com/ankorstore/yokai-http-template`, which can never match this module: a no-op.
+- **`promy-template-go` Makefile `git-check` checklist** still asks "One domain/layer per commit?", contradicting the one-PR-per-business-purpose rule.
+- **`promy-event-bus` HOWTO** contradicts itself: the FAQ says a Tier 1 handler "should route to events:dlq" while the DLQ section says the subscriber auto-routes.
+- **README Go badge** is hardcoded in template-go (a dynamic badge cannot read private repos).
+- Local debris to clean: two stashes in the template-go checkout (both superseded), stale `chore/align-precommit-hooks` branches in the crm/product/user checkouts, hand-written `.git/hooks/pre-commit` scripts (moved to `pre-commit.legacy` by `make setup`; delete after setup), and worktrees registered by past sessions (`git worktree list`, `git worktree prune`).
 
 **Other un-actioned findings**
 - **`main` cannot be protected server-side.** `gh api .../branches/main/protection` returns `403 Upgrade to GitHub Pro` on these private free-plan repos. The local branch guard is the only control, and `git commit --no-verify` bypasses it. It is the strongest control available on this plan, not a strong one.
