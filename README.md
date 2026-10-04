@@ -141,7 +141,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
 | `dependabot-automerge.yml` | `dependabot-automerge/v1` | Own tag namespace, same as the others. Immutable `dependabot-automerge/v1.0.0` alongside. |
 | `go-vuln-fix.yml` | `go-vuln-fix/v1` | Own tag namespace, same as the others. Immutable `go-vuln-fix/v1.0.0` alongside. |
-| `.pre-commit-hooks.yaml` | `hooks/v1.1.0` (adds `go-vuln`); `hooks/v1.2.0` planned (adds `workflow-sync`). `hooks/v1.0.0` has neither | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
+| `.pre-commit-hooks.yaml` | `hooks/v1.2.0` (latest: adds `workflow-sync`; `hooks/v1.1.0` added `go-vuln`). `hooks/v1.0.0` has neither | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
 
@@ -442,11 +442,11 @@ CI runs the same hook when the `lint` job sets `with: {workflow-sync: true}` (se
 
 ### Why it is centralised
 
-- `main` cannot be protected server-side. `gh api repos/tclavelloux/<repo>/branches/main/protection` returns `403 Upgrade to GitHub Pro` — the `promy-*` repos are private on a free plan. This hook is the only control that exists, not a local mirror of a GitHub rule.
+- Every repo has a server-side ruleset `protect-main` (PR required, squash only, required checks, Admin-only bypass). It needs GitHub Pro for the five private repos; the account has been on Pro since 2026-10-04. This hook stops a commit on `main` before it exists locally; the ruleset stops the push.
 - A `local` hook duplicated across six `.pre-commit-config.yaml` files is one policy in six places, free to drift. Same failure mode as the per-caller workflow inputs `go-coverage/v2` removed.
 - It cannot live in `.githooks/`. `core.hooksPath` does not survive a clone (it is written to `.git/config`), and `pre-commit install` refuses outright while it is set: `Cowardly refusing to install hooks with core.hooksPath set`. The two mechanisms are mutually exclusive; the fleet standardises on pre-commit.
 
-A hook is not a substitute for a server-side rule — it runs only where it is installed, and `--no-verify` bypasses it. It is the strongest control available on this plan, not a strong one.
+A hook is not a substitute for a server-side rule — it runs only where it is installed, and `--no-verify` bypasses it. The ruleset is the control; the hook is early feedback.
 
 ## CI
 
@@ -462,3 +462,5 @@ A hook is not a substitute for a server-side rule — it runs only where it is i
 Every `uses:` in this repo's own workflows is pinned to a full commit SHA with a trailing version comment (`actions/checkout@<sha> # v4.4.0`), not to a mutable tag. `vladopajic/go-test-coverage@v2` matters most: it is the only third-party action, it runs in a job holding `pull-requests: write`, and a mutable major tag is one its maintainer can repoint underneath every caller with no review on this side.
 
 Dependabot (`.github/dependabot.yml`, `github-actions` ecosystem, weekly) is what keeps these pins from going stale — pinning without Dependabot just freezes the fleet on old actions. Each Dependabot PR bumps one SHA and its version comment; it does not touch the per-workflow moving major tags (`go-lint/v1`, `go-coverage/v2`, `go-vuln/v1`, `go-docker/v1`) that callers track — those are managed by hand, per the Versioning section above.
+
+<!-- readme-updated-at: 59f5fd1 -->
