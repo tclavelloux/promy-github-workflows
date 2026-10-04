@@ -158,7 +158,7 @@ A moving tag warns on every invocation and freezes each developer at whatever co
 
 **crm tests are wall-clock dependent.** See §2 blocker: quiet hours 22:00–08:00 make `TestDeleteCommunicationHandler` (and any test creating a message for `user_001`) return 409. The pre-push `check-coverage` hook blocks the push with `error: failed to push some refs` and no reason: read the hook output above it. Do not bypass with `--no-verify`.
 
-**`[skip ci]` in the HEAD commit suppresses every workflow of a PR**, including the one you are trying to prove. A throwaway validation PR must not carry it. On protected repos a `[skip ci]` PR reports no checks and needs `gh pr merge --admin`.
+**`[skip ci]` in the HEAD commit suppresses every workflow of a PR**, including the one you are trying to prove. Any occurrence of the text counts, even in a message that only talks about it (a commit explaining the problem re-suppressed its own checks). A throwaway validation PR must not carry it. On protected repos a `[skip ci]` PR reports no checks and needs `gh pr merge --admin`.
 
 **Never require a path-filtered check.** event-bus `validate` (registry) runs only on `registry/**` PRs; as a required check it would block everything else.
 

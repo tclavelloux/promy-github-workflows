@@ -33,7 +33,7 @@ Continue the promy fleet CI/security work. Read `promy-github-workflows/FLEET-ST
 ## Landmines found in the last session (FLEET-STATUS §5 has the CI ones)
 
 - **crm tests are wall-clock dependent.** Between 22:00 and 08:00 the pre-push `check-coverage` hook and CI `test` fail (409 in `TestDeleteCommunicationHandler`). The push then fails with `error: failed to push some refs` and no reason: read the hook output above it. Dependabot's Monday 05:00 Paris run is 03:00 UTC, inside the window.
-- **`[skip ci]` in the HEAD commit suppresses every workflow of a PR**, including the one you are trying to prove. A throwaway validation PR must not carry it.
+- **`[skip ci]` in the HEAD commit suppresses every workflow of a PR**, including the one you are trying to prove. Any occurrence of the text counts, even in a message that only talks about it (a commit explaining the problem re-suppressed its own checks). A throwaway validation PR must not carry it.
 - **Never make a path-filtered check required** (event-bus `validate` runs only on `registry/**`).
 - **`GITHUB_TOKEN`-created PRs and merges start no workflows** (vuln-fix PRs have no CI until closed and reopened; an automerge squash does not fire release-please).
 - **Reusable-workflow run logs have no step names** (`UNKNOWN STEP`); `::notice` output is in the check-run annotations (`gh api repos/<r>/check-runs/<job>/annotations`).
