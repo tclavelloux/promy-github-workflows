@@ -1,0 +1,108 @@
+name: Python Typecheck
+
+# Per project (matrix over `projects`): frozen env, then basedpyright against the
+# project's committed baseline. New errors fail; baselined ones are grandfathered.
+# One job id (`typecheck`) keeps the caller's check names fixed:
+# `typecheck / typecheck (src/store)`.
+#
+# basedpyright is the project's own: it must sit in the `dev` dependency group, so
+# the version in uv.lock is the one that runs locally and here. Dependabot bumps it.
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        description: 'JSON array of uv project directories, e.g. `["src/leaflet","src/store"]`. Every entry needs a tracked uv.lock.'
+        required: true
+        type: string
+      baseline-file:
+        description: Path of the basedpyright baseline, relative to each project directory. A missing file fails the job with the command to create it (see `require-baseline`), instead of silently type checking without a baseline.
+        required: false
+        type: string
+        default: .basedpyright/baseline.json
+      require-baseline:
+        description: Fail when the baseline file is missing (default). Set false only for a project with zero type errors - basedpyright writes no baseline file in that case, so a clean project cannot satisfy the default. A baselined project must never set it false.
+        required: false
+        type: boolean
+        default: true
+      args:
+        description: Extra one-off flags appended to `basedpyright`. Rule selection belongs in the project's `[tool.basedpyright]`. Word-split without globbing.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(inputs.projects) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve uv version
+        id: uv
+        run: |
+          # .uv-version is the repo's pin; a missing pin is an error, never "latest".
+          if [ ! -s .uv-version ]; then
+            echo "::error file=.uv-version::.uv-version is missing or empty. It is the source of truth for the uv version."
+            exit 1
+          fi
+          version="$(head -n1 .uv-version | tr -d '[:space:]')"
+          version="${version#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+            echo "::error file=.uv-version::.uv-version must hold one plain version such as 0.11.13, found '${version}'."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ steps.uv.outputs.version }}
+          enable-cache: true
+          cache-dependency-glob: ${{ matrix.project }}/uv.lock
+
+      - name: Require uv.lock and baseline
+        env:
+          PROJECT: ${{ matrix.project }}
+          BASELINE: ${{ inputs.baseline-file }}
+          REQUIRE_BASELINE: ${{ inputs.require-baseline }}
+        run: |
+          if [ ! -f "${PROJECT}/uv.lock" ]; then
+            echo "::error::${PROJECT}/uv.lock not found. Every project in the projects input needs a committed lock."
+            exit 1
+          fi
+          if [ ! -f "${PROJECT}/${BASELINE}" ] && [ "$REQUIRE_BASELINE" = "true" ]; then
+            echo "::error file=${PROJECT}/${BASELINE}::baseline not found. This workflow type checks against a committed baseline and will not run without one. Create it once with 'cd ${PROJECT} && uv run basedpyright --baselinefile ${BASELINE} --writebaseline', commit it, and only ever regenerate it to shrink it."
+            exit 1
+          fi
+
+      - name: Sync frozen environment
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          cd "$PROJECT"
+          uv sync --frozen
+
+      - name: basedpyright
+        env:
+          PROJECT: ${{ matrix.project }}
+          BASELINE: ${{ inputs.baseline-file }}
+          ARGS: ${{ inputs.args }}
+        run: |
+          cd "$PROJECT"
+          if ! uv run --frozen --no-sync basedpyright --version > /dev/null; then
+            echo "::error file=${PROJECT}/pyproject.toml::basedpyright is not installed in the frozen env. Add it to the project's dev dependency group."
+            exit 1
+          fi
+          # `args` is intentionally word-split, but a bare $ARGS would also glob.
+          # read -ra splits on IFS without globbing.
+          read -ra extra_args <<< "$ARGS"
+          uv run --frozen --no-sync basedpyright --baselinefile "$BASELINE" "${extra_args[@]}"

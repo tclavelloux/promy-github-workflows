@@ -9,6 +9,11 @@ const (
 	GoTestCoverageVersion = "2.19.0"
 	GolangciLintVersion   = "2.13.2"
 
+	// Python tool versions decided by the reusable workflows. The caller's own pin
+	// files (.ruff-version, .uv-version) are checked by python-lint, not here.
+	RuffVersion       = "0.17.0" // python-lint.yml ruff-version default
+	OSVScannerVersion = "2.6.0"  // python-vuln.yml osv-scanner-version default
+
 	// AutomergeIf: no status function, so GitHub ANDs success() implicitly.
 	AutomergeIf = "github.event.pull_request.user.login == 'dependabot[bot]'"
 	DraftSkipIf = "github.event.pull_request.draft == false"
@@ -25,6 +30,11 @@ var WorkflowMajors = map[string]int{
 	"pr-title":             1,
 	"dependabot-automerge": 1,
 	"go-vuln-fix":          1,
+	"python-lint":          1,
+	"python-typecheck":     1,
+	"python-vuln":          1,
+	"python-test":          1,
+	"python-docker":        1,
 }
 
 var CommitTypes = []string{"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"}

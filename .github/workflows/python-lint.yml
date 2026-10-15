@@ -1,0 +1,612 @@
+name: Python Lint
+
+# Per project (matrix over `projects`): `uv lock --check` and deptry in a frozen
+# env. Once per run (matrix index 0): ruff, the uv and ruff pin drift checks, the
+# `.python-version` vs Dockerfile check, and the `projects` coverage check. One
+# job id (`lint`) keeps the caller's check names fixed: `lint / lint (src/store)`.
+#
+# The static checks are scripts/python_pins.py inlined below, not read from that
+# file: a reusable workflow has no documented context exposing its own ref, so it
+# cannot check out its own files at the pinned version. The block between the
+# `python-pins body` markers must stay byte-identical to the same block in the
+# script (governance_test.go compares them); the script has the unit tests.
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        description: 'JSON array of uv project directories, e.g. `["src/leaflet","src/store"]`. Every entry needs a tracked pyproject.toml and uv.lock, and every tracked uv.lock must be listed: an unlisted project fails the run instead of going ungated. Template projects need no entry; the pin checks discover them.'
+        required: true
+        type: string
+      ruff-version:
+        description: ruff version to run (with or without a leading `v`). The single place the fleet's ruff version is decided. A caller whose `.ruff-version` differs gets a warning, never a failure.
+        required: false
+        type: string
+        default: 0.17.0
+      deptry-args:
+        description: Arguments for `deptry`, run from each project directory inside its frozen env. Word-split without globbing.
+        required: false
+        type: string
+        default: src/job --known-first-party helpers
+      workflow-sync:
+        description: "Run the fleet `workflow-sync` pre-commit hook at the caller's pinned `rev:` over the whole repo. Requires `- id: workflow-sync` under the promy-github-workflows entry of the caller's .pre-commit-config.yaml, and adds setup-go for that one step."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(inputs.projects) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve uv version
+        id: uv
+        run: |
+          # .uv-version is the repo's pin; a missing pin is an error, never "latest".
+          if [ ! -s .uv-version ]; then
+            echo "::error file=.uv-version::.uv-version is missing or empty. It is the source of truth for the uv version."
+            exit 1
+          fi
+          version="$(head -n1 .uv-version | tr -d '[:space:]')"
+          version="${version#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+            echo "::error file=.uv-version::.uv-version must hold one plain version such as 0.11.13, found '${version}'."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ steps.uv.outputs.version }}
+          enable-cache: true
+          cache-dependency-glob: ${{ matrix.project }}/uv.lock
+
+      - name: Resolve ruff version
+        id: ruff
+        env:
+          RAW_VERSION: ${{ inputs.ruff-version }}
+        run: |
+          # Strip a leading 'v' so this input and .ruff-version's bare `0.17.0` are interchangeable.
+          echo "version=${RAW_VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install static checks
+        run: |
+          cat > "$RUNNER_TEMP/python_pins.py" <<'PY'
+          # >>> python-pins body
+          # Keep this block byte-identical between scripts/python_pins.py and
+          # .github/workflows/python-lint.yml (governance CI diffs them).
+          import json
+          import os
+          import posixpath
+          import re
+          import subprocess
+          import sys
+
+          if sys.version_info < (3, 11):
+              sys.exit("::error::python-pins needs Python >= 3.11 (tomllib)")
+          import tomllib
+
+          VERSION_RE = re.compile(r"\d+(?:\.\d+)*")
+          SPEC_RE = re.compile(r"^(>=|<=|==|!=|>|<)\s*(\d+(?:\.\d+)*)$")
+          SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".ruff_cache"}
+
+
+          class Report:
+              """Collects GitHub workflow-command annotations; every error counts."""
+
+              def __init__(self, out=None):
+                  self.errors = 0
+                  self.out = out or sys.stdout
+
+              @staticmethod
+              def _data(s):
+                  return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+              @staticmethod
+              def _prop(s):
+                  return Report._data(s).replace(":", "%3A").replace(",", "%2C")
+
+              def _emit(self, level, file, msg, title, line):
+                  props = []
+                  if file:
+                      props.append(f"file={self._prop(file)}")
+                  if line:
+                      props.append(f"line={line}")
+                  if title:
+                      props.append(f"title={self._prop(title)}")
+                  head = f"::{level} {','.join(props)}" if props else f"::{level}"
+                  print(f"{head}::{self._data(msg)}", file=self.out)
+
+              def error(self, file, msg, title=None, line=None):
+                  self.errors += 1
+                  self._emit("error", file, msg, title, line)
+
+              def warning(self, file, msg, title=None, line=None):
+                  self._emit("warning", file, msg, title, line)
+
+              def notice(self, file, msg, title=None, line=None):
+                  self._emit("notice", file, msg, title, line)
+
+              def info(self, msg):
+                  print(msg, file=self.out)
+
+
+          def list_files(root):
+              """Tracked files (git ls-files) when root is a work tree, else a filtered walk."""
+              if os.path.exists(os.path.join(root, ".git")):
+                  res = subprocess.run(
+                      ["git", "-C", root, "ls-files", "-z"], capture_output=True, text=True, check=False
+                  )
+                  if res.returncode == 0:
+                      names = [n for n in res.stdout.split("\0") if n]
+                      return sorted(n for n in names if os.path.isfile(os.path.join(root, n)))
+              found = []
+              for base, dirs, names in os.walk(root):
+                  dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+                  for n in names:
+                      found.append(os.path.relpath(os.path.join(base, n), root).replace(os.sep, "/"))
+              return sorted(found)
+
+
+          def parse_version(s):
+              s = s.strip()
+              if s.startswith("v"):
+                  s = s[1:]
+              if not VERSION_RE.fullmatch(s):
+                  return None
+              return tuple(int(p) for p in s.split("."))
+
+
+          def _cmp(a, b):
+              n = max(len(a), len(b))
+              a = a + (0,) * (n - len(a))
+              b = b + (0,) * (n - len(b))
+              return (a > b) - (a < b)
+
+
+          def satisfies(version, spec):
+              """(ok, error). Supports comma-joined >=, >, <=, <, ==, != clauses on dotted numbers."""
+              v = parse_version(version)
+              if v is None:
+                  return False, f"version {version!r} is not a plain dotted number"
+              for clause in spec.split(","):
+                  m = SPEC_RE.match(clause.strip())
+                  if not m:
+                      return False, f"unsupported version specifier {clause.strip()!r} (use >=, >, <=, <, ==, !=)"
+                  op, rhs = m.group(1), parse_version(m.group(2))
+                  c = _cmp(v, rhs)
+                  ok = {">=": c >= 0, ">": c > 0, "<=": c <= 0, "<": c < 0, "==": c == 0, "!=": c != 0}[op]
+                  if not ok:
+                      return False, None
+              return True, None
+
+
+          def read_text(root, rel):
+              with open(os.path.join(root, rel), encoding="utf-8") as fh:
+                  return fh.read()
+
+
+          def read_toml(root, rel, rep):
+              try:
+                  with open(os.path.join(root, rel), "rb") as fh:
+                      return tomllib.load(fh)
+              except (OSError, tomllib.TOMLDecodeError) as exc:
+                  rep.error(rel, f"cannot parse {rel}: {exc}", "toml")
+                  return None
+
+
+          def read_pin(root, files, rel, rep, title, why):
+              """Returns the pinned version without a leading v, or None after an error annotation."""
+              if rel not in files:
+                  rep.error(rel, f"{rel} is missing; {why}", title)
+                  return None
+              pin = read_text(root, rel).strip().splitlines()
+              pin = pin[0].strip() if pin else ""
+              parsed = parse_version(pin)
+              if parsed is None:
+                  rep.error(rel, f"{rel} must hold one plain version such as 1.2.3, found {pin!r}", title)
+                  return None
+              return pin[1:] if pin.startswith("v") else pin
+
+
+          def dirname(rel):
+              return posixpath.dirname(rel)
+
+
+          def join(d, name):
+              return posixpath.join(d, name) if d else name
+
+
+          def is_dockerfile(rel):
+              base = posixpath.basename(rel)
+              if base.endswith(".dockerignore"):
+                  return False
+              return bool(re.fullmatch(r"Dockerfile(\..+)?|.+\.[Dd]ockerfile", base))
+
+
+          def uv_projects(root, files, rep):
+              """pyproject.toml files that belong to a uv project: a sibling uv.lock or a [tool.uv] table."""
+              out = []
+              fileset = set(files)
+              for rel in files:
+                  if posixpath.basename(rel) != "pyproject.toml":
+                      continue
+                  d = dirname(rel)
+                  data = read_toml(root, rel, rep)
+                  if data is None:
+                      continue
+                  if join(d, "uv.lock") in fileset or "uv" in data.get("tool", {}):
+                      out.append({"dir": d, "pyproject": rel, "data": data})
+              return out
+
+
+          def precommit_revs(text, repo_pattern):
+              """(rev, line) for each rev: under a repo: whose URL matches repo_pattern."""
+              revs = []
+              current = None
+              for n, raw in enumerate(text.splitlines(), 1):
+                  m = re.match(r"^\s*(?:-\s*)?repo:\s*(\S+)", raw)
+                  if m:
+                      current = m.group(1).strip("'\"")
+                      continue
+                  m = re.match(r"^\s*rev:\s*(.*)$", raw)
+                  if m and current is not None and re.search(repo_pattern, current):
+                      value = re.split(r"\s+#", m.group(1), maxsplit=1)[0].strip().strip("'\"")
+                      revs.append((value, n))
+              return revs
+
+
+          def precommit_has_repo(text, repo_pattern):
+              return any(
+                  re.search(repo_pattern, m.group(1).strip("'\""))
+                  for m in re.finditer(r"^\s*(?:-\s*)?repo:\s*(\S+)", text, re.M)
+              )
+
+
+          UV_REPO = r"astral-sh/uv-pre-commit(?:\.git)?/?$"
+          RUFF_REPO = r"astral-sh/ruff-pre-commit(?:\.git)?/?$"
+          PRECOMMIT = ".pre-commit-config.yaml"
+
+
+          def check_precommit_rev(root, files, rep, repo_pattern, repo_name, expected, source, title):
+              if PRECOMMIT not in files:
+                  rep.error(PRECOMMIT, f"{PRECOMMIT} is missing; expected a {repo_name} entry with rev: {expected}", title)
+                  return 0
+              revs = precommit_revs(read_text(root, PRECOMMIT), repo_pattern)
+              if not revs:
+                  rep.error(PRECOMMIT, f"no {repo_name} entry; expected rev: {expected} ({source})", title)
+                  return 0
+              for rev, n in revs:
+                  if rev != expected:
+                      rep.error(PRECOMMIT, f"{repo_name} rev is {rev}, expected {expected} ({source})", title, n)
+              return len(revs)
+
+
+          def check_floor(rep, rel, spec, pin, source, title):
+              ok, err = satisfies(pin, spec)
+              if err:
+                  rep.error(rel, f"required-version {spec!r}: {err}", title)
+              elif not ok:
+                  rep.error(rel, f"required-version {spec} is not satisfied by {source} {pin}", title)
+              return ok
+
+
+          def cmd_uv_pins(root, files, rep):
+              title = "uv-pin"
+              projects = uv_projects(root, files, rep)
+              if not projects:
+                  rep.notice(None, "no uv project (uv.lock or [tool.uv]) found; nothing to check", title)
+                  return
+              pin = read_pin(root, files, ".uv-version", rep, title, "it is the source of truth for the uv version")
+              if pin is None:
+                  return
+              places = 1
+              places += check_precommit_rev(root, files, rep, UV_REPO, "astral-sh/uv-pre-commit", pin, ".uv-version", title)
+              for p in projects:
+                  rel = p["pyproject"]
+                  spec = p["data"].get("tool", {}).get("uv", {}).get("required-version")
+                  if spec is None:
+                      rep.error(rel, f"[tool.uv] required-version is missing; add a floor such as >={pin}", title)
+                  elif isinstance(spec, str):
+                      check_floor(rep, rel, spec, pin, ".uv-version", title)
+                      if spec.strip().startswith("=="):
+                          rep.warning(rel, "an exact required-version breaks Dependabot's uv updater; use a floor", title)
+                      places += 1
+                  else:
+                      rep.error(rel, f"[tool.uv] required-version must be a string, found {spec!r}", title)
+                  for rel_df in files:
+                      if dirname(rel_df) != p["dir"] or not is_dockerfile(rel_df):
+                          continue
+                      places += 1
+                      tags = uv_image_tags(read_text(root, rel_df))
+                      if not tags:
+                          rep.error(rel_df, f"no COPY --from=ghcr.io/astral-sh/uv:<tag>; expected tag {pin} (.uv-version)", title)
+                      for tag, n in tags:
+                          if tag != pin:
+                              rep.error(rel_df, f"uv image tag is {tag}, expected {pin} (.uv-version)", title, n)
+              if rep.errors == 0:
+                  rep.info(f"uv {pin}: {places} places agree")
+
+
+          def uv_image_tags(text):
+              tags = []
+              for n, raw in enumerate(text.splitlines(), 1):
+                  if re.match(r"^\s*(COPY|FROM|ADD)\b", raw, re.I):
+                      m = re.search(r"ghcr\.io/astral-sh/uv(?::([^\s@]+))?(?:@\S+)?", raw)
+                      if m:
+                          tags.append((m.group(1) or "(untagged)", n))
+              return tags
+
+
+          def cmd_ruff_pins(root, files, rep, workflow_version=None):
+              title = "ruff-pin"
+              projects = uv_projects(root, files, rep)
+              ruff_tomls = [f for f in files if posixpath.basename(f) in ("ruff.toml", ".ruff.toml")]
+              pyproject_ruff = []
+              for f in files:
+                  if posixpath.basename(f) == "pyproject.toml":
+                      data = read_toml(root, f, rep)
+                      if data is not None and "ruff" in data.get("tool", {}):
+                          pyproject_ruff.append((f, data["tool"]["ruff"]))
+              has_hook = PRECOMMIT in files and precommit_has_repo(read_text(root, PRECOMMIT), RUFF_REPO)
+              if not (projects or ruff_tomls or pyproject_ruff or has_hook):
+                  rep.notice(None, "no Python or ruff configuration found; nothing to check", title)
+                  return
+              pin = read_pin(root, files, ".ruff-version", rep, title, "it is the source of truth for the ruff version")
+              if pin is None:
+                  return
+              if workflow_version:
+                  wf = workflow_version[1:] if workflow_version.startswith("v") else workflow_version
+                  if wf != pin:
+                      rep.warning(
+                          ".ruff-version",
+                          f".ruff-version pins {pin}, but python-lint ran ruff {wf}. Local ruff may diverge from CI until they match.",
+                          title,
+                      )
+              places = 1
+              places += check_precommit_rev(root, files, rep, RUFF_REPO, "astral-sh/ruff-pre-commit", f"v{pin}", ".ruff-version", title)
+              configs = [(f, None) for f in ruff_tomls] + pyproject_ruff
+              if not configs:
+                  rep.error(".", "no ruff.toml (or [tool.ruff] in pyproject.toml) declares required-version", title)
+              for f, section in configs:
+                  cfg = section if section is not None else read_toml(root, f, rep)
+                  if cfg is None:
+                      continue
+                  spec = cfg.get("required-version")
+                  if spec is None:
+                      rep.error(f, f"required-version is missing; add a floor such as >={pin}", title)
+                  elif isinstance(spec, str):
+                      check_floor(rep, f, spec, pin, ".ruff-version", title)
+                      places += 1
+                  else:
+                      rep.error(f, f"required-version must be a string, found {spec!r}", title)
+              if rep.errors == 0:
+                  rep.info(f"ruff {pin}: {places} places agree")
+
+
+          def python_minor(text):
+              m = re.match(r"^\s*(?:cpython-)?(\d+)\.(\d+)(?:\.\d+)?", text)
+              return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+          def docker_python_tags(text):
+              tags = []
+              for n, raw in enumerate(text.splitlines(), 1):
+                  m = re.match(r"^\s*FROM\s+(?:--\S+\s+)*(\S+)", raw, re.I)
+                  if m and re.match(r"^(?:docker\.io/library/)?python(?::|$)", m.group(1)):
+                      tags.append((m.group(1).split(":", 1)[1] if ":" in m.group(1) else "(untagged)", n))
+              return tags
+
+
+          def cmd_python_version(root, files, rep):
+              title = "python-version"
+              projects = uv_projects(root, files, rep)
+              if not projects:
+                  rep.notice(None, "no uv project found; nothing to check", title)
+                  return
+              for p in projects:
+                  d = p["dir"]
+                  pv_rel = join(d, ".python-version")
+                  if pv_rel not in files:
+                      rep.error(pv_rel, f"{pv_rel} is missing; uv and the Dockerfile base image must agree on one Python", title)
+                      continue
+                  text = read_text(root, pv_rel)
+                  minor = python_minor(text)
+                  if minor is None:
+                      rep.error(pv_rel, f"{pv_rel} must start with X.Y, found {text.strip()!r}", title)
+                      continue
+                  req = p["data"].get("project", {}).get("requires-python")
+                  if isinstance(req, str):
+                      ok, err = satisfies(text.strip().split()[0].replace("cpython-", ""), req)
+                      if err:
+                          rep.error(p["pyproject"], f"requires-python {req!r}: {err}", title)
+                      elif not ok:
+                          rep.error(p["pyproject"], f"requires-python {req} is not satisfied by {pv_rel} {text.strip()}", title)
+                  for rel_df in files:
+                      if dirname(rel_df) != d or not is_dockerfile(rel_df):
+                          continue
+                      tags = docker_python_tags(read_text(root, rel_df))
+                      if not tags:
+                          rep.notice(rel_df, "no FROM python: base image; nothing to compare", title)
+                      for tag, n in tags:
+                          got = python_minor(tag)
+                          if got is None:
+                              rep.error(rel_df, f"FROM python:{tag} carries no X.Y; pin python:{minor[0]}.{minor[1]}", title, n)
+                          elif got != minor:
+                              rep.error(
+                                  rel_df,
+                                  f"FROM python:{tag} but {pv_rel} is {text.strip()} (expected python:{minor[0]}.{minor[1]})",
+                                  title,
+                                  n,
+                              )
+              if rep.errors == 0:
+                  rep.info(f"python version: {len(projects)} project(s) agree")
+
+
+          def cmd_projects(root, files, rep, raw):
+              title = "projects"
+              try:
+                  listed = json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  rep.error(None, f"projects input is not valid JSON: {exc}", title)
+                  return
+              if not isinstance(listed, list) or not listed or not all(isinstance(x, str) and x for x in listed):
+                  rep.error(None, "projects input must be a non-empty JSON array of directory strings", title)
+                  return
+              fileset = set(files)
+              norm = []
+              for entry in listed:
+                  n = posixpath.normpath(entry)
+                  if n.startswith("/") or n == ".." or n.startswith("../"):
+                      rep.error(None, f"project {entry!r} must be a relative path inside the repository", title)
+                      continue
+                  n = "" if n == "." else n
+                  norm.append(n)
+                  for need in ("pyproject.toml", "uv.lock"):
+                      if join(n, need) not in fileset:
+                          rep.error(join(n, need), f"project {entry} has no tracked {need}; fix the projects input or commit it", title)
+              for f in files:
+                  if posixpath.basename(f) == "uv.lock" and dirname(f) not in norm:
+                      rep.error(f, f"{f} is not covered by the projects input; add {dirname(f) or '.'} so it is gated", title)
+              if rep.errors == 0:
+                  rep.info(f"projects: {len(norm)} listed, every uv.lock covered")
+
+
+          def main(argv=None, out=None):
+              argv = list(sys.argv[1:] if argv is None else argv)
+              root = "."
+              if argv[:1] == ["--root"] and len(argv) >= 2:
+                  root, argv = argv[1], argv[2:]
+              if not argv:
+                  print("usage: python_pins.py [--root DIR] uv-pins|ruff-pins|python-version|projects JSON", file=sys.stderr)
+                  return 2
+              cmd, rest = argv[0], argv[1:]
+              rep = Report(out)
+              files = list_files(root)
+              if cmd == "uv-pins" and not rest:
+                  cmd_uv_pins(root, files, rep)
+              elif cmd == "ruff-pins" and (not rest or (len(rest) == 2 and rest[0] == "--workflow-version")):
+                  cmd_ruff_pins(root, files, rep, rest[1] if rest else None)
+              elif cmd == "python-version" and not rest:
+                  cmd_python_version(root, files, rep)
+              elif cmd == "projects" and len(rest) == 1:
+                  cmd_projects(root, files, rep, rest[0])
+              else:
+                  print(f"unknown or malformed command: {' '.join(argv)}", file=sys.stderr)
+                  return 2
+              return 1 if rep.errors else 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          # <<< python-pins body
+          PY
+
+      - name: Check projects input
+        if: ${{ strategy.job-index == 0 }}
+        env:
+          PROJECTS: ${{ inputs.projects }}
+        run: python3 "$RUNNER_TEMP/python_pins.py" projects "$PROJECTS"
+
+      - name: Check uv pin drift
+        # Every independent check runs even when an earlier one failed, so a PR sees every red at once.
+        if: ${{ strategy.job-index == 0 && !cancelled() }}
+        run: python3 "$RUNNER_TEMP/python_pins.py" uv-pins
+
+      - name: Check ruff pin drift
+        if: ${{ strategy.job-index == 0 && !cancelled() }}
+        env:
+          RUFF_VERSION: ${{ steps.ruff.outputs.version }}
+        run: python3 "$RUNNER_TEMP/python_pins.py" ruff-pins --workflow-version "$RUFF_VERSION"
+
+      - name: Check .python-version against Dockerfiles
+        if: ${{ strategy.job-index == 0 && !cancelled() }}
+        run: python3 "$RUNNER_TEMP/python_pins.py" python-version
+
+      - name: ruff check
+        if: ${{ strategy.job-index == 0 && !cancelled() }}
+        env:
+          RUFF_VERSION: ${{ steps.ruff.outputs.version }}
+        run: uvx "ruff@${RUFF_VERSION}" check --no-cache --output-format=github .
+
+      - name: ruff format --check
+        if: ${{ strategy.job-index == 0 && !cancelled() }}
+        env:
+          RUFF_VERSION: ${{ steps.ruff.outputs.version }}
+        run: uvx "ruff@${RUFF_VERSION}" format --check --diff --no-cache .
+
+      - name: Require uv.lock
+        if: ${{ !cancelled() }}
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          if [ ! -f "${PROJECT}/uv.lock" ]; then
+            echo "::error::${PROJECT}/uv.lock not found. Every project in the projects input needs a committed lock."
+            exit 1
+          fi
+
+      - name: uv lock --check
+        if: ${{ !cancelled() }}
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          cd "$PROJECT"
+          if ! uv lock --check; then
+            echo "::error file=${PROJECT}/uv.lock::uv.lock is out of date with pyproject.toml. Run 'uv lock' in ${PROJECT} and commit the result."
+            exit 1
+          fi
+
+      # deptry maps imports to distributions through installed metadata, so it
+      # must run in the frozen env. A bare `uvx deptry` reports a false DEP001
+      # for every first-party and third-party import.
+      - name: Sync frozen environment
+        if: ${{ !cancelled() }}
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          cd "$PROJECT"
+          uv sync --frozen
+
+      - name: deptry
+        if: ${{ !cancelled() }}
+        env:
+          PROJECT: ${{ matrix.project }}
+          ARGS: ${{ inputs.deptry-args }}
+        run: |
+          cd "$PROJECT"
+          if ! uv run --frozen --no-sync deptry --version > /dev/null; then
+            echo "::error file=${PROJECT}/pyproject.toml::deptry is not installed in the frozen env. Add it to the project's dev dependency group."
+            exit 1
+          fi
+          # `deptry-args` is intentionally word-split, but a bare $ARGS would also
+          # glob. read -ra splits on IFS without globbing.
+          read -ra extra_args <<< "$ARGS"
+          uv run --frozen --no-sync deptry "${extra_args[@]}"
+
+      # Policy and code come from the caller's immutable hook `rev:`, so the local
+      # hook and this step run the identical check. Folded into lint rather than a
+      # separate reusable workflow: Actions bills each job rounded up to a minute.
+      # A Python repo has no go.mod, and the hook is `language: golang`, so Go is
+      # set up here for this step only.
+      - name: Set up Go for workflow-sync
+        if: ${{ strategy.job-index == 0 && inputs.workflow-sync && !cancelled() }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+
+      - name: Check fleet governance (workflow-sync)
+        if: ${{ strategy.job-index == 0 && inputs.workflow-sync && !cancelled() }}
+        env:
+          PRE_COMMIT_VERSION: 4.6.0
+        run: pipx run --spec "pre-commit==${PRE_COMMIT_VERSION}" pre-commit run workflow-sync --all-files --color=never

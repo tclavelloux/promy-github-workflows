@@ -1,0 +1,85 @@
+name: Python Docker
+
+# Per project (matrix over `projects`): build the project's Dockerfile, no push,
+# then run the image's `--help` as a smoke test. The Dockerfile is the only
+# supported runtime of the fleet's Python jobs, so a green build is a required
+# check. One job id (`docker`) keeps the caller's check names fixed:
+# `docker / docker (src/store)`.
+#
+# The build context is the project directory (what its docker-compose.yml uses).
+# Layers are cached in the GitHub Actions cache; COPY of uv.lock invalidates the
+# dependency layer exactly when the lock changes, so no explicit lock key is needed.
+# `.python-version` vs `FROM python:` and the uv tag are checked statically by
+# python-lint; this workflow proves the build itself.
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        description: 'JSON array of project directories, e.g. `["src/leaflet","src/store"]`. Each is a build context; the Dockerfile must exist, a missing one fails the job instead of being skipped.'
+        required: true
+        type: string
+      dockerfile:
+        description: Dockerfile path, relative to each project directory.
+        required: false
+        type: string
+        default: Dockerfile
+      smoke-command:
+        description: Command run in the built image (`docker run --rm <image> <command>`). Must exit 0. Word-split without globbing.
+        required: false
+        type: string
+        default: python main.py --help
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(inputs.projects) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require Dockerfile
+        id: image
+        env:
+          PROJECT: ${{ matrix.project }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          if [ ! -f "${PROJECT}/${DOCKERFILE}" ]; then
+            echo "::error::${PROJECT}/${DOCKERFILE} not found. Every project in the projects input needs a Dockerfile; nothing was built."
+            exit 1
+          fi
+          # Image names and cache scopes cannot carry '/', so slug the path.
+          slug="$(printf '%s' "$PROJECT" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed 's/^-*//; s/-*$//')"
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.project }}
+          file: ${{ matrix.project }}/${{ inputs.dockerfile }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: promy-ci-build/${{ steps.image.outputs.slug }}:ci
+          cache-from: type=gha,scope=docker-${{ steps.image.outputs.slug }}
+          cache-to: type=gha,mode=max,scope=docker-${{ steps.image.outputs.slug }}
+
+      - name: Smoke test
+        env:
+          IMAGE: promy-ci-build/${{ steps.image.outputs.slug }}:ci
+          SMOKE: ${{ inputs.smoke-command }}
+        run: |
+          # `smoke-command` is intentionally word-split, but a bare $SMOKE would
+          # also glob. read -ra splits on IFS without globbing.
+          read -ra cmd <<< "$SMOKE"
+          docker run --rm "$IMAGE" "${cmd[@]}"

@@ -133,3 +133,21 @@ jobs:
 
       - name: Test
         run: go test -count=1 ./...
+
+  # scripts/python_pins.py and scripts/python_coverage_floor.py are inlined into
+  # python-lint.yml and python-test.yml (a reusable workflow cannot read its own
+  # files). The Go tests above keep each inlined block byte-identical to its
+  # script; these tests prove the scripts catch each drift class. ubuntu-latest
+  # ships Python 3.12; the scripts need 3.11+ for tomllib and say so if it is older.
+  python-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit-test the Python check scripts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s scripts/tests -v

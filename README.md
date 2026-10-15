@@ -141,6 +141,11 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
 | `dependabot-automerge.yml` | `dependabot-automerge/v1` | Own tag namespace, same as the others. Immutable `dependabot-automerge/v1.0.0` alongside. |
 | `go-vuln-fix.yml` | `go-vuln-fix/v1` | Own tag namespace, same as the others. Immutable `go-vuln-fix/v1.0.0` alongside. |
+| `python-lint.yml` | `python-lint/v1` | New; own tag namespace. `RuffVersion` in `policy.go` ties to its `ruff-version` default. |
+| `python-typecheck.yml` | `python-typecheck/v1` | New; own tag namespace. |
+| `python-vuln.yml` | `python-vuln/v1` | New; own tag namespace. `OSVScannerVersion` in `policy.go` ties to its default. |
+| `python-test.yml` | `python-test/v1` | New; own tag namespace. |
+| `python-docker.yml` | `python-docker/v1` | New; own tag namespace. |
 | `.pre-commit-hooks.yaml` | `hooks/v1.2.0` (latest: adds `workflow-sync`; `hooks/v1.1.0` added `go-vuln`). `hooks/v1.0.0` has neither | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
@@ -359,6 +364,145 @@ GH_TOKEN= gh run list --workflow "Vuln fix" --limit 50 --json databaseId -q '.[]
   | xargs -I{} sh -c 'gh run view {} --log 2>/dev/null | grep vuln-record'
 ```
 
+## Python workflows
+
+Five reusable workflows for uv-managed Python repos (first consumer: `promy-market-catalog`). Opt-in, one caller job each, tags `python-{lint,typecheck,vuln,test,docker}/v1`.
+
+```yaml
+jobs:
+  lint:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-lint.yml@python-lint/v1
+    with:
+      projects: '["src/leaflet","src/store"]'
+  typecheck:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-typecheck.yml@python-typecheck/v1
+    with:
+      projects: '["src/leaflet","src/store"]'
+  vuln:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-vuln.yml@python-vuln/v1
+    with:
+      projects: '["src/leaflet","src/store"]'
+  test:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-test.yml@python-test/v1
+    with:
+      projects: '["src/store"]'
+  docker:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-docker.yml@python-docker/v1
+    with:
+      projects: '["src/leaflet","src/store"]'
+```
+
+Shared contract:
+
+- **`projects`** is a JSON array string of project directories. Each workflow matrixes over it inside one job whose id equals the caller's job name, so check names are fixed: `lint / lint (src/store)`, `test / test (src/store)`. Required checks in a ruleset use those names.
+- **Never path-filter** these jobs: a required check that does not run blocks the PR.
+- A listed project without its `uv.lock` (or `Dockerfile` for `python-docker`) fails the job. Nothing is skipped.
+- `contents: read` only; no secrets; every `inputs.*` reaches the shell through `env:`. A caller with `secrets: inherit` is unnecessary.
+- Callers track the moving `@python-<name>/v1` tag; additive changes (new optional inputs, new default versions) ride it.
+- **uv version** comes from the caller's `.uv-version` (`astral-sh/setup-uv` installs exactly it). A missing or malformed file fails the job; there is no `latest` fallback.
+- `uv sync --frozen` everywhere. The uv cache (`setup-uv` `enable-cache`) is keyed on each project's `uv.lock`, which matters for torch.
+- Pytest, pytest-cov, deptry and basedpyright are the project's own `dev` dependencies: the lock decides their versions, and `uv run` uses the same ones locally.
+
+### `python-lint.yml`
+
+Per project: `uv lock --check`, then `uv sync --frozen` and `deptry`. Once per run (matrix index 0): everything else.
+
+| Check | Fails when |
+|---|---|
+| `ruff check`, `ruff format --check` | Repo-wide, with the caller's `ruff.toml`, at the `ruff-version` input |
+| projects | A listed project lacks `pyproject.toml` or `uv.lock`, or a tracked `uv.lock` is not listed |
+| uv pin drift | `.uv-version`, the `astral-sh/uv-pre-commit` `rev:`, each `COPY --from=ghcr.io/astral-sh/uv:X` and each `[tool.uv] required-version` floor disagree |
+| ruff pin drift | `.ruff-version`, the `astral-sh/ruff-pre-commit` `rev: vX` and each `required-version` floor in `ruff.toml` / `[tool.ruff]` disagree |
+| `.python-version` | A project's `.python-version` is missing, disagrees with a `FROM python:X.Y` in its Dockerfile, or violates `requires-python` |
+| `uv lock --check` | `uv.lock` is stale against `pyproject.toml` |
+| deptry | Runs in the frozen env (a bare `uvx deptry` reports false DEP001) |
+
+Drift rules:
+
+- The check reads tracked files only (`git ls-files`), discovers every uv project (a `pyproject.toml` with a sibling `uv.lock` or a `[tool.uv]` table, template directories included), and never hardcodes a path.
+- One annotation per mismatching file, with the expected and found values (and the line for hooks and Dockerfiles).
+- A missing pin in a uv project is an error, not a skip: no `.uv-version`, no `required-version`, a Dockerfile with no uv `COPY`.
+- `required-version` is a floor: `.uv-version` must satisfy it, not equal it. An exact `==X` passes with a warning (it breaks Dependabot's uv updater).
+- A `.ruff-version` that differs from the `ruff-version` input is a warning, never a failure, like `.golangci-version` in `go-lint`.
+- Logic: `scripts/python_pins.py`, inlined into the workflow; unit tests with a failing fixture per mismatch class in `scripts/tests/`.
+
+Bump uv in one PR that edits every place: `.uv-version`, the `uv-pre-commit` `rev:`, every `COPY --from=ghcr.io/astral-sh/uv:X`, the floors in every `pyproject.toml` that must rise, then `uv lock` per project. The caller's `dependabot.yml` ignores the `ghcr.io/astral-sh/uv` image, so uv bumps stay deliberate. Bump ruff the same way: `.ruff-version`, the `ruff-pre-commit` `rev:`, `ruff.toml` floor.
+
+| Input | Default | Purpose |
+|---|---|---|
+| `projects` | required | JSON array of uv project directories |
+| `ruff-version` | `0.17.0` | ruff to run (with or without a leading `v`). The fleet's single ruff decision; `RuffVersion` in `policy.go` is tied to it |
+| `deptry-args` | `src/job --known-first-party helpers` | Arguments to `deptry` from each project directory. Word-split, not globbed |
+| `workflow-sync` | `false` | Run the `workflow-sync` pre-commit hook at the caller's pinned `rev:`; adds `setup-go` for that one step. Needs `- id: workflow-sync` in the caller's `.pre-commit-config.yaml` and the Python profile of `workflow-sync` |
+
+### `python-typecheck.yml`
+
+Per project: `uv sync --frozen`, then `basedpyright --baselinefile <baseline-file>` (the project's own, from its `dev` group). New errors fail; baselined ones are grandfathered.
+
+- A missing baseline fails with the exact command to create it. `require-baseline: false` is for a project with zero errors only: basedpyright writes no baseline file when there is nothing to record (verified), so a clean project cannot satisfy the default.
+- Regenerate a baseline only to shrink it.
+- basedpyright exits 1 on warnings too, so the baseline must cover warnings: write it after the tests and any other code that the check sees.
+
+| Input | Default | Purpose |
+|---|---|---|
+| `projects` | required | JSON array of uv project directories |
+| `baseline-file` | `.basedpyright/baseline.json` | Baseline path relative to each project directory |
+| `require-baseline` | `true` | Fail when the baseline file is missing |
+| `args` | `""` | Extra flags for `basedpyright`. Word-split, not globbed |
+
+### `python-vuln.yml`
+
+Per project: `osv-scanner scan source --lockfile <project>/uv.lock`. Python has no reachability analysis, so any known advisory in the lock fails, minus ignores.
+
+- Config: `<project>/osv-scanner.toml`, else `osv-scanner.toml` at the repo root, else none. Each `[[IgnoredVulns]]` entry should carry `id`, `reason` and `ignoreUntil`; osv-scanner re-reports an advisory once its `ignoreUntil` has passed.
+- Install: the `osv-scanner_linux_amd64` release asset, rejected unless its sha256 equals the `osv-scanner-sha256` input. The digest is pinned in the workflow, not fetched from the same release.
+- Bump osv-scanner: change both defaults (take the digest from the release's `osv-scanner_SHA256SUMS`, `linux_amd64` line) and `OSVScannerVersion` in `internal/syncheck/policy.go`; governance CI ties the version, and the workflow fails closed on a wrong digest.
+- Needs network access to the OSV API; a scanner failure fails the job.
+
+| Input | Default | Purpose |
+|---|---|---|
+| `projects` | required | JSON array of uv project directories |
+| `osv-scanner-version` | `2.6.0` | Version to install (with or without a leading `v`) |
+| `osv-scanner-sha256` | digest of 2.6.0 | sha256 of `osv-scanner_linux_amd64` for that version |
+| `args` | `""` | Extra flags for `osv-scanner scan source`. Word-split, not globbed |
+
+### `python-test.yml`
+
+Per project: `uv sync --frozen`, then `pytest -m "<markers>" --cov --cov-fail-under=<fail_under>`.
+
+- The floor is `[tool.coverage.report] fail_under` in the project's `pyproject.toml`; the same value drives the local `make check-coverage`.
+- A missing, zero, negative, non-numeric or above-100 `fail_under` is an error. Never zero (the `go-coverage` v2 lesson).
+- A warning when `[tool.coverage.run]` has no `source`: unexecuted files would not count.
+- Pytest config (`pythonpath`, `--disable-socket`, markers, `source`) lives in the project's `pyproject.toml`.
+- No PR comment and no ratchet check against the base branch.
+- Logic: `scripts/python_coverage_floor.py`, inlined into the workflow, with unit tests.
+
+| Input | Default | Purpose |
+|---|---|---|
+| `projects` | required | JSON array of uv project directories |
+| `markers` | `not network and not model and not gcp` | pytest `-m` expression |
+| `args` | `""` | Extra flags for `pytest`. Word-split, not globbed |
+
+### `python-docker.yml`
+
+Per project: `docker/build-push-action` (context = the project directory, `linux/amd64`, `push: false`, `load: true`, GitHub Actions layer cache scoped per project), then `docker run --rm <image> <smoke-command>`.
+
+- A missing Dockerfile fails the job.
+- The smoke command only has to exit 0, so a broken import or entrypoint fails it. It does not assert which commands the help lists.
+- The static `.python-version` vs `FROM` check lives in `python-lint`; this workflow proves the build.
+- Timeout 45 minutes; the leaflet image (chromium, Playwright, CPU torch) is the long pole.
+
+| Input | Default | Purpose |
+|---|---|---|
+| `projects` | required | JSON array of project directories (build contexts) |
+| `dockerfile` | `Dockerfile` | Dockerfile path relative to each project directory |
+| `smoke-command` | `python main.py --help` | Command run in the image; must exit 0. Word-split, not globbed |
+
 ## Shared pre-commit hooks
 
 `.pre-commit-hooks.yaml` at the repo root makes this repo a pre-commit **remote hook repository**, alongside its reusable workflows. Callers add it to their own `.pre-commit-config.yaml`:
@@ -455,7 +599,8 @@ A hook is not a substitute for a server-side rule — it runs only where it is i
 - `actionlint` parses every workflow file and shellchecks each `run:` block. Version pinned in `.actionlint-version`.
 - `zizmor` audits the same workflows for security anti-patterns actionlint doesn't check — unpinned action refs, credential persistence, template injection. Version pinned in `.zizmor-version`, mirroring `.actionlint-version`. Installed from zizmor's released binary rather than `uvx zizmor`, so the job needs no Python/uv toolchain — same reasoning as the actionlint install step.
 
-- `workflow-sync` runs `gofmt -l`, `go vet` and `go test ./...`. The tests include `internal/syncheck/governance_test.go`, which fails when the policy constants drift from `go-coverage.yml`, `go-lint.yml`, `pr-title.yml` or `templates/`.
+- `workflow-sync` runs `gofmt -l`, `go vet` and `go test ./...`. The tests include `internal/syncheck/governance_test.go`, which fails when the policy constants drift from `go-coverage.yml`, `go-lint.yml`, `python-lint.yml`, `python-vuln.yml`, `pr-title.yml` or `templates/`, and `python_workflows_test.go`, which fails when an inlined script block differs from `scripts/` or a Python workflow breaks a hard rule (SHA pins, `persist-credentials: false`, read-only token, inputs through `env:`, timeout, one job per workflow).
+- `python-scripts` runs the unit tests of `scripts/python_pins.py` and `scripts/python_coverage_floor.py` (`python3 -m unittest discover -s scripts/tests`).
 
 ### Action-pinning policy
 
