@@ -446,6 +446,7 @@ Per project: `uv sync --frozen`, then `basedpyright --baselinefile <baseline-fil
 
 - A missing baseline fails with the exact command to create it. `require-baseline: false` is for a project with zero errors only: basedpyright writes no baseline file when there is nothing to record (verified), so a clean project cannot satisfy the default.
 - Regenerate a baseline only to shrink it.
+- basedpyright exits 1 on warnings too, so the baseline must cover warnings: write it after the tests and any other code that the check sees.
 
 | Input | Default | Purpose |
 |---|---|---|
