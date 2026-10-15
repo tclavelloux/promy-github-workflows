@@ -1,0 +1,94 @@
+name: Python Vulnerability Check
+
+# Per project (matrix over `projects`): osv-scanner over the project's uv.lock.
+# Python has no reachability analysis, so ANY known advisory in the lock fails,
+# minus the expiring ignores in osv-scanner.toml. One job id (`vuln`) keeps the
+# caller's check names fixed: `vuln / vuln (src/store)`.
+#
+# Config: `<project>/osv-scanner.toml` wins, else `osv-scanner.toml` at the repo
+# root, else none. Every ignore should carry `ignoreUntil` and `reason`;
+# osv-scanner re-reports a vulnerability once its `ignoreUntil` has passed.
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        description: 'JSON array of uv project directories, e.g. `["src/leaflet","src/store"]`. Every entry needs a tracked uv.lock; a missing lock fails the job instead of passing with nothing scanned.'
+        required: true
+        type: string
+      osv-scanner-version:
+        description: osv-scanner version to install (with or without a leading `v`). The single place the fleet's scanner version is decided. A different version needs its own `osv-scanner-sha256`.
+        required: false
+        type: string
+        default: 2.6.0
+      osv-scanner-sha256:
+        description: Expected sha256 of the `osv-scanner_linux_amd64` release asset for `osv-scanner-version`. The download is rejected on any mismatch.
+        required: false
+        type: string
+        default: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+      args:
+        description: Extra one-off flags appended to `osv-scanner scan source` (e.g. `--format=json`). Word-split without globbing.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  vuln:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(inputs.projects) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install osv-scanner
+        env:
+          RAW_VERSION: ${{ inputs.osv-scanner-version }}
+          EXPECTED_SHA256: ${{ inputs.osv-scanner-sha256 }}
+        run: |
+          set -euo pipefail
+          version="${RAW_VERSION#v}"
+          url="https://github.com/google/osv-scanner/releases/download/v${version}/osv-scanner_linux_amd64"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/osv-scanner" "$url"
+          # Verify against the pinned digest, not against a checksum file fetched
+          # from the same release: a tampered release would ship a matching file.
+          actual="$(sha256sum "$RUNNER_TEMP/osv-scanner" | cut -d' ' -f1)"
+          if [ "$actual" != "$EXPECTED_SHA256" ]; then
+            echo "::error::osv-scanner v${version} sha256 is ${actual}, expected ${EXPECTED_SHA256}. If you changed osv-scanner-version, pass the matching osv-scanner-sha256."
+            exit 1
+          fi
+          install -m 0755 "$RUNNER_TEMP/osv-scanner" /usr/local/bin/osv-scanner
+          osv-scanner --version
+
+      - name: Run osv-scanner
+        env:
+          PROJECT: ${{ matrix.project }}
+          ARGS: ${{ inputs.args }}
+        run: |
+          set -euo pipefail
+          lock="${PROJECT}/uv.lock"
+          if [ ! -f "$lock" ]; then
+            echo "::error::${lock} not found. Every project in the projects input needs a committed lock; nothing was scanned."
+            exit 1
+          fi
+          config=()
+          if [ -f "${PROJECT}/osv-scanner.toml" ]; then
+            config=(--config "${PROJECT}/osv-scanner.toml")
+          elif [ -f osv-scanner.toml ]; then
+            config=(--config osv-scanner.toml)
+          fi
+          echo "scanning ${lock} (config: ${config[*]-none})"
+          # `args` is intentionally word-split, but a bare $ARGS would also glob.
+          # read -ra splits on IFS without globbing.
+          read -ra extra_args <<< "$ARGS"
+          if ! osv-scanner scan source ${config[@]+"${config[@]}"} --lockfile "$lock" ${extra_args[@]+"${extra_args[@]}"}; then
+            echo "::error file=${lock}::osv-scanner reported vulnerabilities or failed. Bump the package with 'uv lock --upgrade-package <name>', or add an osv-scanner.toml [[IgnoredVulns]] entry with reason and ignoreUntil."
+            exit 1
+          fi

@@ -1,0 +1,171 @@
+name: Python Test
+
+# Per project (matrix over `projects`): frozen env, then pytest with coverage and
+# the floor read from the project's own pyproject. One job id (`test`) keeps the
+# caller's check names fixed: `test / test (src/store)`.
+#
+# The floor is `[tool.coverage.report] fail_under`. A missing, zero, negative or
+# non-numeric floor is an ERROR, never "no gate" (the go-coverage v2 lesson: a
+# threshold that can silently be zero is not a threshold).
+#
+# The floor is read by scripts/python_coverage_floor.py, inlined below, not read
+# from that file: a reusable workflow has no documented context exposing its own
+# ref, so it cannot check out its own files at the pinned version. The block
+# between the `python-coverage-floor body` markers must stay byte-identical to the
+# same block in the script (governance_test.go compares them).
+#
+# pytest, pytest-cov and any plugin (pytest-socket) come from the project's `dev`
+# group, so the lock decides their versions.
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        description: 'JSON array of uv project directories, e.g. `["src/leaflet","src/store"]`. Every entry needs a tracked uv.lock and a `[tool.coverage.report] fail_under`.'
+        required: true
+        type: string
+      markers:
+        description: pytest `-m` expression. The default skips tests that need the network, real model weights or GCP.
+        required: false
+        type: string
+        default: not network and not model and not gcp
+      args:
+        description: Extra one-off flags appended to `pytest`. Test selection and coverage settings belong in the project's pyproject. Word-split without globbing.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(inputs.projects) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve uv version
+        id: uv
+        run: |
+          # .uv-version is the repo's pin; a missing pin is an error, never "latest".
+          if [ ! -s .uv-version ]; then
+            echo "::error file=.uv-version::.uv-version is missing or empty. It is the source of truth for the uv version."
+            exit 1
+          fi
+          version="$(head -n1 .uv-version | tr -d '[:space:]')"
+          version="${version#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+            echo "::error file=.uv-version::.uv-version must hold one plain version such as 0.11.13, found '${version}'."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # torch is large; the cache is keyed on the lock, so it is restored until the lock changes.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ steps.uv.outputs.version }}
+          enable-cache: true
+          cache-dependency-glob: ${{ matrix.project }}/uv.lock
+
+      - name: Install coverage floor reader
+        run: |
+          cat > "$RUNNER_TEMP/python_coverage_floor.py" <<'PY'
+          # >>> python-coverage-floor body
+          # Keep this block byte-identical between scripts/python_coverage_floor.py and
+          # .github/workflows/python-test.yml (governance CI diffs them).
+          import os
+          import sys
+
+          if sys.version_info < (3, 11):
+              sys.exit("::error::python-coverage-floor needs Python >= 3.11 (tomllib)")
+          import tomllib
+
+
+          def annotate(level, file, msg):
+              msg = msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              file = file.replace("%", "%25").replace(":", "%3A").replace(",", "%2C")
+              print(f"::{level} file={file}::{msg}", file=sys.stderr)
+
+
+          def coverage_floor(project):
+              """(floor, None) or (None, error message). Missing, zero, negative or > 100 is an error."""
+              rel = os.path.join(project, "pyproject.toml")
+              try:
+                  with open(rel, "rb") as fh:
+                      data = tomllib.load(fh)
+              except (OSError, tomllib.TOMLDecodeError) as exc:
+                  return None, f"cannot read {rel}: {exc}"
+              cov = data.get("tool", {}).get("coverage", {})
+              floor = cov.get("report", {}).get("fail_under")
+              if floor is None:
+                  return None, (
+                      f"[tool.coverage.report] fail_under is missing in {rel}. A missing floor is an error, never zero: "
+                      "set it to floor(measured coverage)."
+                  )
+              if isinstance(floor, bool) or not isinstance(floor, (int, float)):
+                  return None, f"[tool.coverage.report] fail_under must be a number, found {floor!r}"
+              if not 0 < floor <= 100:
+                  return None, f"[tool.coverage.report] fail_under = {floor} must be in (0, 100]; zero is not a gate"
+              run = cov.get("run", {})
+              if not (run.get("source") or run.get("source_pkgs")):
+                  annotate("warning", rel, "[tool.coverage.run] has no source: unexecuted files are not measured and inflate coverage")
+              return floor, None
+
+
+          def main(argv=None):
+              argv = sys.argv[1:] if argv is None else argv
+              if len(argv) != 1:
+                  print("usage: python_coverage_floor.py <project-dir>", file=sys.stderr)
+                  return 2
+              floor, err = coverage_floor(argv[0])
+              if err:
+                  annotate("error", os.path.join(argv[0], "pyproject.toml"), err)
+                  return 1
+              print(floor)
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          # <<< python-coverage-floor body
+          PY
+
+      - name: Read coverage floor
+        id: floor
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          if [ ! -f "${PROJECT}/uv.lock" ]; then
+            echo "::error::${PROJECT}/uv.lock not found. Every project in the projects input needs a committed lock."
+            exit 1
+          fi
+          floor="$(python3 "$RUNNER_TEMP/python_coverage_floor.py" "$PROJECT")"
+          echo "${PROJECT}: coverage floor ${floor}%"
+          echo "floor=$floor" >> "$GITHUB_OUTPUT"
+
+      - name: Sync frozen environment
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          cd "$PROJECT"
+          uv sync --frozen
+
+      - name: pytest
+        env:
+          PROJECT: ${{ matrix.project }}
+          FLOOR: ${{ steps.floor.outputs.floor }}
+          MARKERS: ${{ inputs.markers }}
+          ARGS: ${{ inputs.args }}
+        run: |
+          cd "$PROJECT"
+          # `args` is intentionally word-split, but a bare $ARGS would also glob.
+          # read -ra splits on IFS without globbing.
+          read -ra extra_args <<< "$ARGS"
+          uv run --frozen --no-sync pytest -m "$MARKERS" --cov --cov-report=term-missing --cov-fail-under="$FLOOR" "${extra_args[@]}"

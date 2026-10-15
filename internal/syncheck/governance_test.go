@@ -18,6 +18,8 @@ const (
 	govCoverageYML = ".github/workflows/go-coverage.yml"
 	govLintYML     = ".github/workflows/go-lint.yml"
 	govPRTitleYML  = ".github/workflows/pr-title.yml"
+	govPyLintYML   = ".github/workflows/python-lint.yml"
+	govPyVulnYML   = ".github/workflows/python-vuln.yml"
 )
 
 func govRead(t *testing.T, rel string) []byte {
@@ -54,6 +56,29 @@ func TestPolicyGolangciLintVersion(t *testing.T) {
 	got := strings.TrimPrefix(scalar(n), "v")
 	if got != GolangciLintVersion {
 		t.Errorf("policy.go GolangciLintVersion = %s but %s on.workflow_call.inputs.golangci-lint-version.default = %q", GolangciLintVersion, govLintYML, scalar(n))
+	}
+}
+
+func TestPolicyRuffVersion(t *testing.T) {
+	n := path(govYAML(t, govPyLintYML), "on", "workflow_call", "inputs", "ruff-version", "default")
+	got := strings.TrimPrefix(scalar(n), "v")
+	if got != RuffVersion {
+		t.Errorf("policy.go RuffVersion = %s but %s on.workflow_call.inputs.ruff-version.default = %q", RuffVersion, govPyLintYML, scalar(n))
+	}
+}
+
+func TestPolicyOSVScannerVersion(t *testing.T) {
+	in := path(govYAML(t, govPyVulnYML), "on", "workflow_call", "inputs")
+	got := strings.TrimPrefix(scalar(path(in, "osv-scanner-version", "default")), "v")
+	if got != OSVScannerVersion {
+		t.Errorf("policy.go OSVScannerVersion = %s but %s osv-scanner-version default = %q", OSVScannerVersion, govPyVulnYML, got)
+	}
+	// The digest cannot be derived offline; the workflow fails closed on a mismatch,
+	// so only its shape is checked here. Re-derive it from the release's
+	// osv-scanner_SHA256SUMS (linux_amd64 line) whenever the version changes.
+	sum := scalar(path(in, "osv-scanner-sha256", "default"))
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(sum) {
+		t.Errorf("%s osv-scanner-sha256 default = %q, want 64 lowercase hex characters", govPyVulnYML, sum)
 	}
 }
 
