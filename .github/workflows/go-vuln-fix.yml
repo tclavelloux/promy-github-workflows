@@ -81,7 +81,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.base-branch }}
+          # Scan the branch the PR targets, not the dispatched ref: a dispatch from
+          # another branch then only picks the caller file, never the scanned code.
+          ref: ${{ inputs.base-branch || github.event.repository.default_branch }}
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
