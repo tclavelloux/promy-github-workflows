@@ -140,7 +140,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-docker.yml` | `go-docker/v1` | Own tag namespace, same as the others. Immutable `go-docker/v1.0.0` alongside. |
 | `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
 | `dependabot-automerge.yml` | `dependabot-automerge/v1` | Own tag namespace, same as the others. Immutable `dependabot-automerge/v1.0.0` alongside. |
-| `go-vuln-fix.yml` | `go-vuln-fix/v1` | Own tag namespace, same as the others. Immutable `go-vuln-fix/v1.0.0` alongside. |
+| `go-vuln-fix.yml` | `go-vuln-fix/v1` | Own tag namespace, same as the others. Immutable `go-vuln-fix/v1.1.0` alongside (adds the optional App secrets and `go-patch-bump`). |
 | `python-lint.yml` | `python-lint/v1` | New; own tag namespace. `RuffVersion` in `policy.go` ties to its `ruff-version` default. |
 | `python-typecheck.yml` | `python-typecheck/v1` | New; own tag namespace. |
 | `python-vuln.yml` | `python-vuln/v1` | New; own tag namespace. `OSVScannerVersion` in `policy.go` ties to its default. |
@@ -312,7 +312,7 @@ The squash commit is pushed by `GITHUB_TOKEN`, so it starts no workflows. releas
 
 ## `go-vuln-fix.yml`
 
-Weekly, patches the module advisories govulncheck reports as **called** and opens a `fix(deps)` PR. Tag `go-vuln-fix/v1`.
+Weekly, patches the advisories govulncheck reports as **called** and opens a `fix(deps)` PR. Tag `go-vuln-fix/v1`.
 
 ```yaml
 name: Vuln fix
@@ -336,16 +336,25 @@ jobs:
       pull-requests: write
       issues: write
     uses: tclavelloux/promy-github-workflows/.github/workflows/go-vuln-fix.yml@go-vuln-fix/v1
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
 ```
 
 Behaviour:
 
-- Module path: group findings by module, take the highest `fixed_version`, run `go get`, `go mod tidy`, `go build ./...`, rescan. Abort to the issue path if the `go` or `toolchain` directive would change.
-- Stdlib path (stdlib/toolchain findings, or module findings with no fix): one rolling issue per repo, marker `<!-- go-vuln-fix:stdlib -->`. Never touches `go` directives or Dockerfiles.
+- Module path: group findings by module, take the highest `fixed_version`, run `go get`, `go mod tidy`, `go build ./...`, rescan. Abort to the issue path if a fix would change the `go` or `toolchain` directive.
+- Go patch bump: a called stdlib/toolchain advisory fixed in a newer patch of the `go` directive's minor (`go 1.26.8` -> `1.26.9`) bumps the directive in the same PR. Tidy, build and the rescan run with `GOTOOLCHAIN=go<target>`; the run aborts if any claimed ID is still called.
+  - Refused, advisory left for the issue: other minors, no fixed version, a `toolchain` directive, `go.work`, a Dockerfile pinning `golang:X.Y.Z` or `@sha256:` (official images set `GOTOOLCHAIN=local`, so they cannot build a newer patch), `.go-version`, a `golang`/`go` line in `.tool-versions`.
+  - Minor-tag Dockerfiles (`golang:1.26`) pass `go-docker.yml`, which compares minors only, and pick up the patch on rebuild.
+  - `go-patch-bump: false` disables it.
+- Stdlib/toolchain findings the bump does not cover, and module findings with no fix: one rolling issue per repo, marker `<!-- go-vuln-fix:stdlib -->`, with the refusal reason. Dockerfiles are never edited.
 - Dedupe: branch `fix/vuln-<12 hex of sha256 over the sorted IDs>`. An open PR on that branch skips the run. A **closed-unmerged** PR on that branch means rejected and is never retried.
-- A new PR closes older open `fix/vuln-*` PRs by `github-actions[bot]` as superseded. The new scan starts from current `main`, so it is a superset.
+- A new PR closes older open `fix/vuln-*` PRs by `github-actions[bot]` or the App as superseded. The new scan starts from current `main`, so it is a superset.
 - The commit goes through GraphQL `createCommitOnBranch` (GitHub-signed, no credentials on disk).
-- **CI does not run on the PR.** `GITHUB_TOKEN`-created PRs start no workflows. Close and reopen the PR (fires `reopened`) before merging.
+- With `APP_CLIENT_ID` and `APP_PRIVATE_KEY`, the PR and commit are authored by the App (`actions/create-github-app-token`, scoped to the calling repo, `contents` + `pull-requests` write), so **CI runs on the PR**. A failed token mint fails the run.
+- Without the secrets, the PR is opened with `GITHUB_TOKEN`: **CI does not run on it** and the PR body says so. Close and reopen the PR (fires `reopened`) before merging.
+- The rolling issue and its comments always use `GITHUB_TOKEN`.
 
 ### Inputs
 
@@ -354,6 +363,16 @@ Behaviour:
 | `govulncheck-version` | `v1.8.0` | Must equal `go-vuln.yml`'s default; this repo's CI enforces it |
 | `go-version-file` | `go.mod` | Path used to resolve the Go toolchain |
 | `base-branch` | `''` (repo default branch) | Branch to scan and open the PR against |
+| `go-patch-bump` | `true` | Bump the `go` directive to a same-minor patch release when a called stdlib advisory is fixed there |
+
+### Secrets
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `APP_CLIENT_ID` | no | Client ID of the fleet GitHub App (installed on the repo, `contents` + `pull-requests` write) |
+| `APP_PRIVATE_KEY` | no | Private key of that App |
+
+Map them explicitly as in the snippet; never `secrets: inherit` (`workflow-sync` rejects it). Both unset: the workflow behaves as before.
 
 Needs `contents: write`, `pull-requests: write`, `issues: write`; the caller job must grant exactly these.
 

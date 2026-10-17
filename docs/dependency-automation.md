@@ -5,11 +5,11 @@
 - 2026-10-03 outage: two `// indirect` modules (otel sdk/otlptrace GO-2026-6505, grpc GO-2026-6348) failed every `vuln` job. `dependency-type: direct` never bumps them.
 - Zero Dependabot PRs have ever merged; ~9-10 are open per repo (re-counted 2026-10-03). Each rewrites `go.sum`, so ungrouped they merge only one at a time.
 - Branch protection: ruleset `protect-main` on all seven repos since 2026-10-04 (issue #27). Required checks include `lint / lint`, which carries `workflow-sync`. Bypass is the Admin role only.
-- No PAT, by choice. Everything runs on `GITHUB_TOKEN`.
+- No PAT, by choice. Everything runs on `GITHUB_TOKEN`, except vuln-fix PRs: a fleet GitHub App opens them so CI runs.
 
 ## Pieces
 
-All tags are cut: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.1.0`.
+Tags: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.1.0` are cut. `go-vuln-fix/v1.1.0` (App token, go patch bump) is cut with the move of `go-vuln-fix/v1`.
 
 | Piece | File | Tag | Fixes |
 |---|---|---|---|
@@ -31,6 +31,18 @@ All tags are cut: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hook
 - `github-actions` bumps are not auto-merged: `GITHUB_TOKEN` cannot merge workflow-file changes. A human merges that group.
 - Vuln fix runs weekly on Thursday, not daily: advisories land every few weeks, Dependabot sweeps Monday, and the hook plus each PR's `vuln` job already surface them. Daily costs 7x for the same signal.
 - The govulncheck version lives in three places (`.govulncheck-version`, `go-vuln.yml`, `go-vuln-fix.yml`) and the fix body in two, because a reusable workflow has no documented context exposing its own ref, so it cannot check out its own files at the pinned version. `ci.yml` asserts both stay in sync.
+- Vuln-fix App token (#28):
+  - Minted per run by `actions/create-github-app-token`, scoped to the calling repo with `contents` + `pull-requests` write; the issue step keeps `GITHUB_TOKEN`.
+  - Optional secrets `APP_CLIENT_ID` + `APP_PRIVATE_KEY`; without them the run falls back to `GITHUB_TOKEN` and the PR body carries the "CI has not run" notice. A failed mint fails the run so a broken key is visible.
+  - `client-id` replaces the deprecated `app-id` input.
+  - Callers map the secrets explicitly; `workflow-sync` rejects `secrets: inherit`.
+  - Automerge never touches these PRs: it requires `dependabot[bot]` as author.
+- Go patch bump:
+  - A called stdlib advisory fixed in a newer patch of the `go` directive's minor bumps the directive in the fix PR. Minor bumps stay human.
+  - Fleet Dockerfiles use minor tags and `go-docker.yml` compares minors only, so no Dockerfile edit is needed.
+  - Official golang images set `GOTOOLCHAIN=local`: a patch- or digest-pinned image cannot build a newer-patch module, so those repos are refused, as are repos with a `toolchain` directive, `go.work`, `.go-version` or a `.tool-versions` Go pin.
+  - Tidy, build and the rescan run under `GOTOOLCHAIN=go<target>`; any claimed ID still called aborts the run and restores go.mod/go.sum.
+  - `go-patch-bump: false` opts out.
 - Fix PR commit uses GraphQL `createCommitOnBranch`: GitHub signs it and no credentials touch disk.
 - Hook warns unless the pushed range touches `go.mod`/`go.sum`: an advisory published today must not block unrelated pushes, but a dependency edit is where the fix belongs. Manual runs always block.
 - Hook sets `GOTOOLCHAIN` from go.mod: CI resolves the toolchain from go.mod, so local scans on a newer Go understated CVEs (template-go: 8 local vs 30 CI).
@@ -38,12 +50,12 @@ All tags are cut: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hook
 ## Limitations
 
 - `GITHUB_TOKEN`-created PRs and merges start no workflows.
-  - Fix PRs have no CI until someone closes and reopens them.
+  - Fix PRs have CI when the App secrets are set; without them they have none until someone closes and reopens them.
   - The automerge squash does not fire release-please; its PR refreshes on the next human merge.
 - No-PAT alternatives evaluated:
   - `workflow_dispatch` exception: rejected. With no PR payload, the draft check `github.event.pull_request.draft == false` evaluates false and skips every job, and coverage's PR comment breaks.
   - Dependabot security updates: PRs do trigger CI. Vulnerability alerts and automated security fixes are enabled in all six repos (verified via API 2026-10-03; `scripts/check-repo-settings.sh` re-checks). The `gomod-security` group is in the template.
-- Required checks are enforced server-side by `protect-main`, in addition to automerge's own check-run verification. `automerge` itself is not a required check. Release-please, vuln-fix and `[skip ci]` PRs report no checks and need `gh pr merge --admin`.
+- Required checks are enforced server-side by `protect-main`, in addition to automerge's own check-run verification. `automerge` itself is not a required check. Release-please and `[skip ci]` PRs report no checks and need `gh pr merge --admin`; so do vuln-fix PRs opened without the App.
 - promy-event-bus and the governance repo are both public (verified). Visibility is not the constraint: reusable workflows are referenced, not checked out, and a reusable workflow cannot see its own pinned ref to fetch sibling files.
 - Closing a vuln-fix PR without merging is permanent for that advisory set: the same `fix/vuln-<hash>` branch is never reopened. A new advisory changes the hash and opens a fresh PR.
 - `cooldown: 3` delays version updates, not security updates; a fix released < 3 days ago reaches the weekly group PR one week later. go-vuln-fix does not honour cooldown.
@@ -59,6 +71,7 @@ All tags are cut: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hook
    - Replace `.github/dependabot.yml` with `templates/dependabot.yml`.
    - Append `templates/ci-automerge-job.yml` to `ci.yml`, with every existing job in `needs:`.
    - Add `.github/workflows/vuln-fix.yml` from `templates/go-vuln-fix-caller.yml`.
+   - Fleet App (once): create it with `contents` + `pull-requests` write, install it on the repos, add `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repo secrets. Skip it and vuln-fix PRs stay without CI.
    - Set `.pre-commit-config.yaml` rev to `hooks/v1.1.0` and add `- id: go-vuln`. When combined with the `workflow-sync` rollout, use `hooks/v1.2.0` and also add `- id: workflow-sync` (see [workflow-sync.md](workflow-sync.md)).
    - Add the `vuln:` target from `templates/Makefile.vuln.mk`.
    - Merge with the keyring token: `GH_TOKEN= gh pr merge --squash`.
