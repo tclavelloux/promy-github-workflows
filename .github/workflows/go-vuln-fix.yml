@@ -314,6 +314,7 @@ jobs:
           fi
           {
             echo "ids=$(paste -sd, - < "$out/ids.txt")"
+            echo "module_ids=$(cut -f1 "$out/module.tsv" | sort -u | paste -sd, -)"
             echo "hash=$(cat "$out/hash.txt" 2>/dev/null || true)"
             echo "targets=$(paste -sd' ' - < "$out/targets.txt")"
             echo "changed=$(cat "$out/changed.txt")"
@@ -559,7 +560,9 @@ jobs:
           REPO: ${{ github.repository }}
           JOB_STATUS: ${{ job.status }}
           IDS: ${{ steps.fix.outputs.ids }}
+          MODULE_IDS: ${{ steps.fix.outputs.module_ids }}
           STDLIB_IDS: ${{ steps.fix.outputs.stdlib_ids }}
+          STDLIB_FIXED_IDS: ${{ steps.fix.outputs.stdlib_fixed_ids }}
           PR_ACTION: ${{ steps.pr.outputs.action }}
           ISSUE_ACTION: ${{ steps.issue.outputs.action }}
           GO_BUMP: ${{ steps.fix.outputs.go_bump }}
@@ -569,9 +572,10 @@ jobs:
           all_ids="${IDS:+$IDS}"
           if [ -n "$STDLIB_IDS" ]; then all_ids="${all_ids:+$all_ids,}$STDLIB_IDS"; fi
           all_ids="${all_ids:-none}"
-          if [ -n "$IDS" ] && [ -n "$STDLIB_IDS" ]; then kind=both
-          elif [ -n "$IDS" ]; then kind=module
-          elif [ -n "$STDLIB_IDS" ]; then kind=stdlib
+          # IDS also holds the stdlib IDs a go bump fixed, so it cannot tell the kinds apart.
+          if [ -n "$MODULE_IDS" ] && [ -n "$STDLIB_IDS$STDLIB_FIXED_IDS" ]; then kind=both
+          elif [ -n "$MODULE_IDS" ]; then kind=module
+          elif [ -n "$STDLIB_IDS$STDLIB_FIXED_IDS" ]; then kind=stdlib
           else kind=none; fi
           action="${PR_ACTION:-no-pr}"
           if [ "$PR_ACTION" = 'opened' ] && [ -n "$GO_BUMP" ]; then action="$action+go${GO_BUMP##* -> }"; fi
