@@ -22,3 +22,8 @@ jobs:
       pull-requests: write
       issues: write
     uses: tclavelloux/promy-github-workflows/.github/workflows/go-vuln-fix.yml@go-vuln-fix/v1
+    # Optional. Without them the fix PR is opened with GITHUB_TOKEN and CI does
+    # not run on it. Map explicitly; never `secrets: inherit`.
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

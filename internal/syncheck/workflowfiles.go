@@ -133,6 +133,36 @@ func (c *checker) checkVulnFix() {
 	if u := val(job, "uses"); u == nil || u.Value != govRef("go-vuln-fix") {
 		c.add(vulnFixFile, line(u, line(job, 1)), ruleVulnFix, `job "fix" uses %q; want %s`, scalar(u), govRef("go-vuln-fix"))
 	}
+	c.checkVulnFixSecrets(job)
+}
+
+// vulnFixSecrets are the only secrets job "fix" may pass: the GitHub App
+// credentials that let the fix PR trigger CI. The block is optional.
+var vulnFixSecrets = []string{"APP_CLIENT_ID", "APP_PRIVATE_KEY"}
+
+func (c *checker) checkVulnFixSecrets(job *yaml.Node) {
+	sk, sn := get(job, "secrets")
+	if sk == nil {
+		return
+	}
+	want := `{APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}, APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}}`
+	if !isMap(sn) {
+		c.add(vulnFixFile, line(sk, 1), ruleVulnFix, `job "fix" secrets = %q; want an explicit mapping %s (least privilege: never `+"`secrets: inherit`"+`)`, scalar(sn), want)
+		return
+	}
+	got := map[string]string{}
+	for _, k := range keys(sn) {
+		got[k] = normExpr(scalar(val(sn, k)))
+	}
+	ok := len(got) == len(vulnFixSecrets)
+	for _, name := range vulnFixSecrets {
+		if got[name] != "secrets."+name {
+			ok = false
+		}
+	}
+	if !ok {
+		c.add(vulnFixFile, line(sk, 1), ruleVulnFix, `job "fix" secrets = %v; want exactly %s (least privilege)`, got, want)
+	}
 }
 
 func (c *checker) checkDependabot() {
