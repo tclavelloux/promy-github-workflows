@@ -89,4 +89,6 @@ Tags: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.1.0` ar
 3. First-run verification:
    - Watch the first grouped gomod PR's `automerge` job summary. Expect a merge or a precise reason.
    - Run `gh workflow run "Vuln fix"` once per repo (`workflow_dispatch` works with a user token). Confirm the `vuln-record` line in the run log.
+   - To test a caller change (e.g. the `secrets:` block) before it merges, push it on a branch and dispatch from there: `gh workflow run vuln-fix.yml --ref <branch>`.
+     - The ref selects only the caller file. `go-vuln-fix` scans and opens the PR against `base-branch` (default: the repository default branch), so the fix PR carries only `go.mod` and `go.sum`.
    - Make each gate fail once; a green check is not verification. Example: a Dependabot PR with a failing check must leave `automerge` skipped. Repeat for a major bump, a human-pushed extra commit and a `github-actions` PR.
