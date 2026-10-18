@@ -187,3 +187,56 @@ func TestTemplatesPassRules(t *testing.T) {
 		}
 	})
 }
+
+// The py-vuln hook reads .osv-scanner-version; CI's python-vuln.yml has its own default.
+func TestPolicyOSVScannerPinFile(t *testing.T) {
+	got := strings.TrimPrefix(strings.TrimSpace(string(govRead(t, ".osv-scanner-version"))), "v")
+	if got != OSVScannerVersion {
+		t.Errorf(".osv-scanner-version = %s but policy.go OSVScannerVersion = %s (python-vuln.yml default); bump them together", got, OSVScannerVersion)
+	}
+}
+
+func TestPreCommitHooksPyVuln(t *testing.T) {
+	const rel = ".pre-commit-hooks.yaml"
+	var hook *yaml.Node
+	for _, h := range govYAML(t, rel).Content {
+		if scalar(val(h, "id")) == HookPyVuln {
+			hook = h
+		}
+	}
+	if hook == nil {
+		t.Fatalf("%s has no %q hook (policy.go HookPyVuln)", rel, HookPyVuln)
+	}
+	if st, ok := strSet(val(hook, "stages")); !ok || !sameSet(st, setOf("pre-push", "manual")) {
+		t.Errorf("%s %s stages = %s, want {manual, pre-push} (PyVulnRecipe runs --hook-stage manual)", rel, HookPyVuln, fmtSet(st))
+	}
+	entry := scalar(val(hook, "entry"))
+	info, err := os.Stat(filepath.Join("..", "..", filepath.FromSlash(entry)))
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Errorf("%s %s entry %q must be an executable file (language: script): %v", rel, HookPyVuln, entry, err)
+	}
+}
+
+// The uv pin has no workflow default to tie to; the Python template carries it.
+func TestTemplatesPythonPins(t *testing.T) {
+	const rel = "templates/python/pre-commit-config.yaml"
+	want := map[string]string{
+		"https://github.com/astral-sh/uv-pre-commit": UVVersion,
+		RuffHookRepo: "v" + RuffVersion,
+	}
+	for _, r := range readPCRepos(govYAML(t, rel)) {
+		u := normRepoURL(r.url)
+		if w, ok := want[u]; ok {
+			if got := scalar(r.rev); got != w {
+				t.Errorf("%s %s rev = %q but policy.go wants %q", rel, u, got, w)
+			}
+			delete(want, u)
+		}
+		if u == GovernanceHookRepoURL && !immutableHookRev.MatchString(scalar(r.rev)) {
+			t.Errorf("%s governance rev = %q, want hooks/vX.Y.Z", rel, scalar(r.rev))
+		}
+	}
+	for _, u := range sortedKeys(want) {
+		t.Errorf("%s has no %s entry", rel, u)
+	}
+}

@@ -1,0 +1,21 @@
+# Fixture ignores. Tests pin the clock to 2026-10-18, so the 90-day limit is 2027-01-16.
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-139" # CVE-2026-4538
+ignoreUntil = 2027-01-13
+reason = "Not reachable: only a local trusted checkpoint is loaded. No fixed release exists."
+
+[[IgnoredVulns]]
+id = "GHSA-qfhq-4f3w-5fph"
+ignoreUntil = 2027-01-16T00:00:00Z
+reason = """
+Not reachable: no LSTM in the detector.
+Fixed in 2.10.0."""
+
+[[PackageOverrides]]
+name = "torch"
+ecosystem = "PyPI"
+effectiveUntil = 2026-12-01
+reason = "License review pending; vulnerabilities are not ignored here."
+[PackageOverrides.license]
+ignore = true

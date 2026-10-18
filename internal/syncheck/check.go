@@ -20,6 +20,9 @@ type checker struct {
 	docs     map[string]*parsed  // rel path -> parse result cache
 	findings []Finding
 	ioErr    error
+
+	prof    *profile // detected repo profile (go or python)
+	tracked []string // trackedFiles cache; nil until first use
 }
 
 type parsed struct {
@@ -34,6 +37,12 @@ func Run(root string) (Report, error) {
 	}
 	c := &checker{root: root, files: map[string][]string{}, docs: map[string]*parsed{}}
 
+	if c.prof = c.detectProfile(); c.prof == nil {
+		// Fail closed: a repo the policy cannot classify never passes.
+		c.add(".", 0, ruleProfile, "no repo profile: want a go.mod at the root (Go) or a tracked uv.lock or pyproject.toml (Python); nothing else was checked")
+		return applyExemptions(c.files, c.findings), nil
+	}
+
 	c.checkWorkflows()
 	c.checkCI()
 	c.checkPRTitle()
@@ -43,6 +52,10 @@ func Run(root string) (Report, error) {
 	c.checkPreCommit()
 	c.checkMakefile()
 	c.checkRepoFiles()
+	if c.prof == pythonProfile {
+		c.checkOSVIgnores()
+		c.checkCoverageFloors()
+	}
 
 	if c.ioErr != nil {
 		return Report{}, c.ioErr

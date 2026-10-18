@@ -15,9 +15,18 @@
   pass_filenames: false
   require_serial: true
   stages: [pre-push, manual]
+- id: py-vuln
+  name: osv-scanner (blocks only when uv.lock/pyproject.toml/osv-scanner.toml change)
+  description: Runs the fleet-pinned osv-scanner over every tracked uv.lock with CI's config lookup; blocks a push only when it changes a lock, a pyproject.toml or an osv-scanner.toml, otherwise warns.
+  entry: hooks/py-vuln.sh
+  language: script
+  always_run: true
+  pass_filenames: false
+  require_serial: true
+  stages: [pre-push, manual]
 - id: workflow-sync
   name: workflow-sync (fleet CI and hook governance)
-  description: Checks ci.yml, pr-title.yml, release-please.yml, .pre-commit-config.yaml, Makefile and pinned tool files against the fleet policy at this rev.
+  description: Checks ci.yml, pr-title.yml, release-please.yml, dependabot.yml, .pre-commit-config.yaml, Makefile and pinned tool files against the fleet policy at this rev (Go or Python profile).
   entry: workflow-sync
   language: golang
   always_run: true

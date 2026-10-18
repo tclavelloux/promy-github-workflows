@@ -112,7 +112,7 @@ func effectiveStages(root, hook *yaml.Node) (map[string]bool, bool) {
 func (c *checker) checkPreCommit() {
 	p := c.loadYAML(PreCommitConfig)
 	if !p.exists {
-		c.add(PreCommitConfig, 0, rulePCInstallTypes, "file missing; add %s with the fleet's hooks (see templates/pre-commit-go-vuln.yaml)", PreCommitConfig)
+		c.add(PreCommitConfig, 0, rulePCInstallTypes, "file missing; add %s with the fleet's hooks (see %s)", PreCommitConfig, c.prof.precommitTpl)
 		return
 	}
 	root := p.root
@@ -224,7 +224,7 @@ func (c *checker) checkCoverageFields(h *pcHook) {
 		bad(line(pf, h.line), "pass_filenames must be false; the target takes no file arguments")
 	}
 	if ar := val(n, "always_run"); !isBool(ar, true) {
-		bad(line(ar, h.line), "always_run must be true; without it a push with no .go files would skip the coverage gate")
+		bad(line(ar, h.line), "always_run must be true; without it a push with no %s files would skip the coverage gate", c.prof.sourceKind)
 	}
 	want := setOf("pre-push")
 	sn := val(n, "stages")
@@ -243,7 +243,11 @@ func (c *checker) checkNoTestHook(root *yaml.Node, repos []*pcRepo) {
 			continue
 		}
 		entry := scalar(val(h.node, "entry"))
-		if !strings.Contains(entry, "go test") && !strings.Contains(entry, "make test") {
+		runsTests := false
+		for _, e := range c.prof.testEntries {
+			runsTests = runsTests || strings.Contains(entry, e)
+		}
+		if !runsTests {
 			continue
 		}
 		if st, restricted := effectiveStages(root, h.node); restricted && !st["pre-push"] {
@@ -276,9 +280,10 @@ func (c *checker) checkCommitMsgHook(repos []*pcRepo) {
 }
 
 func (c *checker) checkVulnTarget(repos []*pcRepo) {
+	id := c.prof.vulnHook
 	var hook *pcHook
 	for _, h := range allHooks(repos) {
-		if h.id == HookGoVuln {
+		if h.id == id {
 			hook = h
 			break
 		}
@@ -289,13 +294,13 @@ func (c *checker) checkVulnTarget(repos []*pcRepo) {
 	}
 	switch {
 	case hook != nil && target == nil:
-		c.add(PreCommitConfig, hook.line, ruleVulnTarget, "hook %q is present but the Makefile has no `vuln:` target; add it (templates/Makefile.vuln.mk)", HookGoVuln)
+		c.add(PreCommitConfig, hook.line, ruleVulnTarget, "hook %q is present but the Makefile has no `vuln:` target; add it (%s)", id, c.prof.vulnMkTmpl)
 	case hook == nil && target != nil:
-		c.add(MakefileRel, target.line, ruleVulnTarget, "`vuln:` target exists but %s has no %q hook; add it under the governance repo (templates/pre-commit-go-vuln.yaml)", PreCommitConfig, HookGoVuln)
+		c.add(MakefileRel, target.line, ruleVulnTarget, "`vuln:` target exists but %s has no %q hook; add it under the governance repo (%s)", PreCommitConfig, id, c.prof.vulnPCTmpl)
 	case hook != nil && target != nil:
 		rec := target.meaningful()
-		if len(rec) != 1 || rec[0].text != VulnRecipe {
-			c.add(MakefileRel, target.line, ruleVulnTarget, "`vuln:` recipe differs; want exactly one line `%s`", VulnRecipe)
+		if len(rec) != 1 || rec[0].text != c.prof.vulnRecipe {
+			c.add(MakefileRel, target.line, ruleVulnTarget, "`vuln:` recipe differs; want exactly one line `%s`", c.prof.vulnRecipe)
 		}
 	}
 }

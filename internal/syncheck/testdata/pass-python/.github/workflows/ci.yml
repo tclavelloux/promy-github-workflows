@@ -1,0 +1,74 @@
+# Canonical .github/workflows/ci.yml for a uv-managed Python repo (workflow-sync
+# Python profile). Derived from promy-market-catalog.
+#
+# - `projects`: every directory with a tracked uv.lock; docker lists those with a
+#   Dockerfile. workflow-sync's ci-projects rule enforces both. Replace src/app and
+#   src/worker with your project directories.
+# - Check names are fixed by the reusable workflows: `lint / lint (src/app)`,
+#   `test / test (src/app)`, ... Add each to the protect-main required checks.
+# - Never path-filter a job: a required check that does not run blocks the PR.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-lint.yml@python-lint/v1
+    with:
+      projects: '["src/app","src/worker"]'
+      workflow-sync: true
+
+  typecheck:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-typecheck.yml@python-typecheck/v1
+    with:
+      projects: '["src/app","src/worker"]'
+
+  vuln:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-vuln.yml@python-vuln/v1
+    with:
+      projects: '["src/app","src/worker"]'
+
+  test:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-test.yml@python-test/v1
+    with:
+      projects: '["src/app","src/worker"]'
+
+  docker:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-docker.yml@python-docker/v1
+    with:
+      projects: '["src/app","src/worker"]'
+
+  gitleaks:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # gitleaks-action reads GET /repos/{repo}/pulls/{n}/commits to scope the scan
+    # to the PR's commit range, so it needs pull-requests: read. It posts nothing.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
