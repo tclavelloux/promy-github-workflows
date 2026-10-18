@@ -20,6 +20,10 @@ var _ = register(ruleNoGithooks, ruleGolangciVersion, ruleTestCoverage)
 
 func (c *checker) checkRepoFiles() {
 	c.checkGithooks()
+	if c.prof == pythonProfile {
+		c.checkPythonRepoFiles()
+		return
+	}
 	c.checkGolangciVersion()
 	c.checkTestCoverage()
 }

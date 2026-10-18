@@ -1,0 +1,86 @@
+# Canonical .pre-commit-config.yaml for a uv-managed Python repo (workflow-sync
+# Python profile). Derived from promy-market-catalog. Replace src/app and
+# src/worker in the uv-lock entries; run `make setup` once after cloning.
+#
+# `pre-commit install` only writes the hook types listed here. Without this line it
+# writes .git/hooks/pre-commit alone, and the commit-msg and pre-push stages never fire.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+# Hooks that declare no `stages` would otherwise also run at commit-msg and pre-push.
+default_stages: [pre-commit]
+
+repos:
+  # Pin rev to the immutable tag (hooks/vX.Y.Z), never the moving `hooks/v1`.
+  # py-vuln and the Python profile of workflow-sync need hooks/v1.4.0 or later.
+  - repo: https://github.com/tclavelloux/promy-github-workflows
+    rev: hooks/v1.4.0
+    hooks:
+      - id: no-direct-commit-to-main
+      - id: py-vuln
+      - id: workflow-sync
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      # Model weights and scraped data stay out of git (see .gitignore).
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args:
+          - feat
+          - fix
+          - docs
+          - style
+          - refactor
+          - perf
+          - test
+          - build
+          - ci
+          - chore
+          - revert
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.29.1
+    hooks:
+      - id: gitleaks
+
+  # rev must equal .uv-version: the hook installs uv at this version (python-lint checks it).
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.13
+    hooks:
+      - id: uv-lock
+        alias: uv-lock-app
+        name: uv-lock (app)
+        files: ^src/app/(uv\.lock|pyproject\.toml)$
+        args: [--project, src/app]
+      - id: uv-lock
+        alias: uv-lock-worker
+        name: uv-lock (worker)
+        files: ^src/worker/(uv\.lock|pyproject\.toml)$
+        args: [--project, src/worker]
+
+  # Same pytest + coverage run as the CI `test` job; the floor is `fail_under` in
+  # each project's pyproject.toml.
+  - repo: local
+    hooks:
+      - id: check-coverage
+        name: check-coverage
+        entry: make check-coverage
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+  # rev must equal .ruff-version (workflow-sync ruff-version rule); config in ruff.toml.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.0
+    hooks:
+      # Keep markdown out of scope (ruff 0.17 formats code blocks in *.md by default).
+      - id: ruff-check
+        types_or: [python, pyi, jupyter]
+      - id: ruff-format
+        types_or: [python, pyi, jupyter]

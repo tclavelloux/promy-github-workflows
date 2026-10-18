@@ -1,0 +1,12 @@
+# Root-level dotted keys are equivalent to the [tool.coverage.report] table form.
+tool.coverage.report.fail_under = 73.5
+
+[project]
+name = "worker"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["typer>=0.17.4,<0.18"]
+
+[tool.uv]
+package = false
+required-version = ">=0.11.13"

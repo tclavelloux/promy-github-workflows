@@ -9,10 +9,17 @@ const (
 	GoTestCoverageVersion = "2.19.0"
 	GolangciLintVersion   = "2.13.2"
 
-	// Python tool versions decided by the reusable workflows. The caller's own pin
-	// files (.ruff-version, .uv-version) are checked by python-lint, not here.
-	RuffVersion       = "0.17.0" // python-lint.yml ruff-version default
-	OSVScannerVersion = "2.6.0"  // python-vuln.yml osv-scanner-version default
+	// Python tool versions. Ruff and osv-scanner are decided by the reusable
+	// workflows; uv by this file alone (python-lint reads the caller's .uv-version).
+	// The Python profile requires .ruff-version, the ruff-pre-commit rev and
+	// .uv-version to equal these; python-lint ties every other pin to those files.
+	RuffVersion       = "0.17.0"  // python-lint.yml ruff-version default
+	OSVScannerVersion = "2.6.0"   // python-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln hook)
+	UVVersion         = "0.11.13" // fleet uv pin; templates/python/pre-commit-config.yaml uv-pre-commit rev
+
+	// OSVIgnoreMaxDays bounds every osv-scanner ignore: Python has no
+	// reachability analysis, so an ignore must expire and be re-triaged.
+	OSVIgnoreMaxDays = 90
 
 	// AutomergeIf: no status function, so GitHub ANDs success() implicitly.
 	AutomergeIf = "github.event.pull_request.user.login == 'dependabot[bot]'"
@@ -56,6 +63,20 @@ var (
 	CINoPermissionJobs = []string{"lint", "vuln", "docker", "test"}
 )
 
+// Job sets of ci.yml in the Python profile. `docker` is required iff a uv
+// project has a Dockerfile; automerge is optional, as in Go.
+var (
+	PyCIRequiredJobs = []string{"lint", "typecheck", "vuln", "test", "gitleaks"}
+	PyCIReusableJobs = map[string]string{
+		"lint": "python-lint", "typecheck": "python-typecheck", "vuln": "python-vuln",
+		"test": "python-test", "docker": "python-docker", "automerge": "dependabot-automerge",
+	}
+	PyCINoPermissionJobs = []string{"lint", "typecheck", "vuln", "test", "docker"}
+	// PyCIAllProjectJobs must list every uv project in with.projects; docker
+	// lists every uv project that has a Dockerfile.
+	PyCIAllProjectJobs = []string{"lint", "typecheck", "vuln", "test"}
+)
+
 type perms map[string]string
 
 var (
@@ -79,11 +100,15 @@ const (
 	HookBranchGuard   = "no-direct-commit-to-main"
 	HookWorkflowSync  = "workflow-sync"
 	HookGoVuln        = "go-vuln"
+	HookPyVuln        = "py-vuln"
 	HookCheckCoverage = "check-coverage"
 	HookConventional  = "conventional-pre-commit"
 
 	MakeSetupLine = "pre-commit install --install-hooks"
 	VulnRecipe    = "pre-commit run go-vuln --hook-stage manual"
+	PyVulnRecipe  = "pre-commit run py-vuln --hook-stage manual"
+
+	RuffHookRepo = "https://github.com/astral-sh/ruff-pre-commit"
 
 	PreCommitConfig = ".pre-commit-config.yaml"
 	MakefileRel     = "Makefile"

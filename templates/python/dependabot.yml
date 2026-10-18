@@ -1,0 +1,81 @@
+# Canonical .github/dependabot.yml for a uv-managed Python repo (workflow-sync
+# Python profile). Derived from promy-market-catalog; its ML-stack group and
+# torch ignores are repo-specific and left out here.
+#
+# - workflow-sync requires: github-actions at /, a uv entry covering every
+#   directory with a tracked uv.lock, and a docker entry covering every such
+#   directory with a Dockerfile. Replace src/app and src/worker.
+# - `prefix: build` pins the `build(deps):` title; pr-title.yml accepts it and
+#   release-please treats it as non-releasing.
+# - Majors sit outside every group: each stays an individual PR for a human.
+# - uv-security: security updates (Dependabot alerts must be enabled); they
+#   trigger CI, unlike GITHUB_TOKEN PRs, and bypass the cooldown.
+# - The github-actions group needs a human merge: GITHUB_TOKEN cannot merge
+#   changes to workflow files.
+# - docker: the uv image is ignored (python-lint requires every uv pin to move in
+#   one PR; workflow-sync's dependabot rule enforces the ignore), and so are
+#   python minor/major bumps (the tag must equal .python-version).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Paris
+    commit-message:
+      prefix: build
+      include: scope
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: uv
+    directories:
+      - /src/app
+      - /src/worker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Paris
+    commit-message:
+      prefix: build
+      include: scope
+    cooldown:
+      default-days: 3
+    groups:
+      uv:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+      uv-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories:
+      - /src/app
+      - /src/worker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Paris
+    commit-message:
+      prefix: build
+      include: scope
+    cooldown:
+      default-days: 3
+    groups:
+      docker:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: ghcr.io/astral-sh/uv
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

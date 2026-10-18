@@ -62,7 +62,7 @@ func onNames(on *yaml.Node) []string {
 func (c *checker) checkCI() {
 	p := c.loadYAML(ciFile)
 	if !p.exists {
-		c.add(ciFile, 0, ruleCIJobs, "file missing; every repo needs %s with jobs lint, vuln, test, coverage, gitleaks (plus docker when a Dockerfile exists)", ciFile)
+		c.add(ciFile, 0, ruleCIJobs, "file missing; every repo needs %s %s", ciFile, c.prof.ciMissing)
 		return
 	}
 	root := p.root
@@ -76,7 +76,7 @@ func (c *checker) checkCI() {
 
 	jobsKey, jobsNode := get(root, "jobs")
 	if !isMap(jobsNode) {
-		c.add(ciFile, line(jobsKey, 1), ruleCIJobs, "no jobs: mapping; want jobs lint, vuln, test, coverage, gitleaks")
+		c.add(ciFile, line(jobsKey, 1), ruleCIJobs, "no jobs: mapping; want jobs %s", strings.Join(c.prof.requiredJobs, ", "))
 		return
 	}
 	var order []ciJob
@@ -98,7 +98,11 @@ func (c *checker) checkCI() {
 		}
 	}
 	c.ciJobPermissions(byName)
-	c.ciArtifact(byName)
+	if c.prof == goProfile {
+		c.ciArtifact(byName)
+	} else {
+		c.ciProjects(byName)
+	}
 	c.ciLintSync(byName)
 	c.ciAutomerge(order, byName)
 }
@@ -148,34 +152,45 @@ func (c *checker) ciConcurrency(root *yaml.Node) {
 }
 
 func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]ciJob) {
-	allowed := setOf(CIRequiredJobs...)
-	for _, n := range CIOptionalJobs {
+	required, optional := c.prof.requiredJobs, c.prof.optionalJobs
+	allowed := setOf(required...)
+	for _, n := range optional {
 		allowed[n] = true
 	}
 	allowed[CIDockerJob] = true
 
-	for _, n := range CIRequiredJobs {
+	for _, n := range required {
 		if _, ok := byName[n]; !ok {
 			c.add(ciFile, jobsKey.Line, ruleCIJobs, "required job %q is missing", n)
 		}
 	}
-	hasDockerfile := c.isRegularFile("Dockerfile")
 	_, hasDocker := byName[CIDockerJob]
-	switch {
-	case hasDockerfile && !hasDocker:
-		c.add(ciFile, jobsKey.Line, ruleCIJobs, "a Dockerfile exists at the repo root but job %q is missing; add it so the image build is verified on every PR", CIDockerJob)
-	case !hasDockerfile && hasDocker:
-		c.add(ciFile, byName[CIDockerJob].line(), ruleCIJobs, "job %q is present but there is no Dockerfile at the repo root; remove the job (libraries have no image to build)", CIDockerJob)
+	if c.prof == goProfile {
+		hasDockerfile := c.isRegularFile("Dockerfile")
+		switch {
+		case hasDockerfile && !hasDocker:
+			c.add(ciFile, jobsKey.Line, ruleCIJobs, "a Dockerfile exists at the repo root but job %q is missing; add it so the image build is verified on every PR", CIDockerJob)
+		case !hasDockerfile && hasDocker:
+			c.add(ciFile, byName[CIDockerJob].line(), ruleCIJobs, "job %q is present but there is no Dockerfile at the repo root; remove the job (libraries have no image to build)", CIDockerJob)
+		}
+	} else {
+		images := c.dockerProjects()
+		switch {
+		case len(images) > 0 && !hasDocker:
+			c.add(ciFile, jobsKey.Line, ruleCIJobs, "uv project(s) %s have a Dockerfile but job %q is missing; add it so every image build is verified on every PR", strings.Join(images, ", "), CIDockerJob)
+		case len(images) == 0 && hasDocker:
+			c.add(ciFile, byName[CIDockerJob].line(), ruleCIJobs, "job %q is present but no uv project has a Dockerfile; remove the job", CIDockerJob)
+		}
 	}
 	for _, j := range order {
 		if !allowed[j.name] {
-			c.add(ciFile, j.line(), ruleCIJobs, "unknown job %q; allowed: %s", j.name, strings.Join(append(append(append([]string{}, CIRequiredJobs...), CIDockerJob), CIOptionalJobs...), ", "))
+			c.add(ciFile, j.line(), ruleCIJobs, "unknown job %q; allowed: %s", j.name, strings.Join(append(append(append([]string{}, required...), CIDockerJob), optional...), ", "))
 		}
 	}
 }
 
 func (c *checker) ciJobRef(j ciJob) {
-	name, ok := CIReusableJobs[j.name]
+	name, ok := c.prof.reusableJobs[j.name]
 	if !ok {
 		return
 	}
@@ -202,7 +217,7 @@ func (c *checker) ciDraftSkip(j ciJob) {
 }
 
 func (c *checker) ciJobPermissions(byName map[string]ciJob) {
-	for _, name := range CINoPermissionJobs {
+	for _, name := range c.prof.noPermJobs {
 		j, ok := byName[name]
 		if !ok {
 			continue
@@ -211,7 +226,7 @@ func (c *checker) ciJobPermissions(byName map[string]ciJob) {
 			c.add(ciFile, k.Line, ruleCIJobPerms, "job %q permissions = %s; want no permissions: key (inherits top-level contents: read)", name, describePerms(n))
 		}
 	}
-	if j, ok := byName["coverage"]; ok {
+	if j, ok := byName["coverage"]; ok && c.prof == goProfile {
 		k, n := get(j.node, "permissions")
 		c.wantPerms(ciFile, line(k, j.line()), ruleCIJobPerms, `job "coverage"`, n, PermsCoverage)
 		if need, ok := strSet(val(j.node, "needs")); !ok || !sameSet(need, setOf("test")) {

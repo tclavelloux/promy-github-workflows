@@ -104,6 +104,10 @@ func (c *checker) checkVulnFix() {
 	if !p.exists || p.root == nil {
 		return // optional file
 	}
+	if c.prof == pythonProfile {
+		c.add(vulnFixFile, 1, ruleVulnFix, "go-vuln-fix is Go-only; a Python repo gets advisory fixes from Dependabot security updates (uv-security group): delete this file")
+		return
+	}
 	root := p.root
 	k, on := get(root, "on")
 	names := setOf(onNames(on)...)
@@ -168,11 +172,15 @@ func (c *checker) checkVulnFixSecrets(job *yaml.Node) {
 func (c *checker) checkDependabot() {
 	p := c.loadYAML(dependabotYML)
 	if !p.exists {
-		c.add(dependabotYML, 0, ruleDependabot, "file missing; add it with gomod and github-actions ecosystems (see templates/dependabot.yml)")
+		c.add(dependabotYML, 0, ruleDependabot, "file missing; %s", c.prof.dependabotTp)
 		return
 	}
 	root := p.root
 	if root == nil {
+		return
+	}
+	if c.prof == pythonProfile {
+		c.checkPythonDependabot(root)
 		return
 	}
 	uk, updates := get(root, "updates")
