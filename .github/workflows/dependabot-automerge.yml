@@ -1,8 +1,21 @@
 name: Dependabot Automerge
 
-# Squash-merges a Dependabot Go-module PR once every check on its head commit is
-# green. Patch/minor only; majors, GitHub Actions bumps and anything not authored
-# solely by dependabot[bot] are left for a human.
+# Squash-merges a Dependabot PR once every check on its head commit is green.
+# Patch/minor only; majors, GitHub Actions bumps, ecosystems outside `ecosystems`,
+# PRs touching a dependency matched by `exclude-dependencies`, and anything not
+# authored solely by dependabot[bot] are left for a human.
+#
+# Inputs (all optional; defaults keep the Go callers unchanged):
+#   merge-update-types   space-separated fetch-metadata update-type allowlist.
+#   ecosystems           comma-separated Dependabot package-ecosystem allowlist
+#                        (go_modules, uv, pip, docker, ...). Default go_modules.
+#                        github_actions is refused even if listed.
+#   exclude-dependencies newline- or comma-separated globs (`torch*`, `numpy`);
+#                        one matching dependency-name refuses the whole (grouped)
+#                        PR. Case-insensitive; `.` `_` `-` are equivalent. Default none.
+#   wait-attempts / wait-seconds   poll budget for check runs outside this run.
+# The gate logic is scripts/automerge-gate.sh, inlined below (a reusable workflow
+# cannot read its own files at the caller's pinned ref).
 #
 # Call it as the LAST job of the caller's own ci.yml (`on: pull_request`), with
 # `needs:` listing every other job. See templates/ci-automerge-job.yml.
@@ -26,6 +39,16 @@ on:
         required: false
         type: string
         default: version-update:semver-patch version-update:semver-minor
+      ecosystems:
+        description: Comma-separated allowlist of Dependabot `package-ecosystem` values (e.g. `go_modules`, `uv`). `github_actions` is rejected even if listed. A PR from any other ecosystem is not merged.
+        required: false
+        type: string
+        default: go_modules
+      exclude-dependencies:
+        description: Newline- or comma-separated globs of dependency names (e.g. `torch*`, `numpy`). A PR, grouped or not, containing a matching dependency is not merged. Empty disables the check.
+        required: false
+        type: string
+        default: ''
       wait-attempts:
         description: Max polls for check runs outside this workflow run (e.g. pr-title.yml) to complete before giving up without merging.
         required: false
@@ -72,6 +95,9 @@ jobs:
           UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
           ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
           ALLOWED: ${{ inputs.merge-update-types }}
+          ECOSYSTEMS: ${{ inputs.ecosystems }}
+          EXCLUDE: ${{ inputs.exclude-dependencies }}
+          DEPENDENCIES: ${{ steps.meta.outputs.dependency-names }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -90,34 +116,85 @@ jobs:
             exit 0
           }
 
-          # Belt and braces: the job `if:` already requires a dependabot/ head ref.
-          case "$HEAD_REF" in
-            release-please--*) reject "release-please branches are never auto-merged" ;;
-          esac
+          # >>> automerge-gate body
+          # Keep this block byte-identical between scripts/automerge-gate.sh and
+          # .github/workflows/dependabot-automerge.yml (governance tests compare them).
 
-          # Hard-reject majors even if a caller put them in the allowlist.
-          if [ -z "$UPDATE_TYPE" ]; then
-            reject "fetch-metadata reported no update-type"
-          fi
-          if [ "$UPDATE_TYPE" = "version-update:semver-major" ]; then
-            reject "major updates need a human review"
-          fi
-          permitted=false
-          for t in $ALLOWED; do
-            if [ "$t" = "$UPDATE_TYPE" ]; then permitted=true; fi
-          done
-          if [ "$permitted" != "true" ]; then
-            reject "update-type '$UPDATE_TYPE' is not in the allowlist '$ALLOWED'"
-          fi
+          # Lowercase and map '.' and '_' to '-' (PEP 503), so the pattern `typing_extensions*`
+          # matches the dependency `typing-extensions`. Applied to both sides.
+          norm_name() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[._]/-/g'; }
 
-          # fetch-metadata derives the ecosystem from the branch name
-          # (dependabot/<ecosystem>/...): `go_modules` for Go, `github_actions`
-          # for workflow bumps.
-          if [ "$ECOSYSTEM" = "github_actions" ]; then
-            reject "github-actions updates need a human merge: GITHUB_TOKEN cannot merge workflow-file changes"
-          fi
-          if [ "$ECOSYSTEM" != "go_modules" ]; then
-            reject "package-ecosystem '$ECOSYSTEM' is not go_modules"
+          gate() {
+            local t permitted=false eco_list eco eco_ok=false pat name hits="" bad n g
+
+            case "$HEAD_REF" in
+              release-please--*) echo "release-please branches are never auto-merged"; return 1 ;;
+            esac
+
+            # Hard-reject majors even if a caller put them in the allowlist.
+            if [ -z "$UPDATE_TYPE" ]; then
+              echo "fetch-metadata reported no update-type"; return 1
+            fi
+            if [ "$UPDATE_TYPE" = "version-update:semver-major" ]; then
+              echo "major updates need a human review"; return 1
+            fi
+            for t in $ALLOWED; do
+              if [ "$t" = "$UPDATE_TYPE" ]; then permitted=true; fi
+            done
+            if [ "$permitted" != "true" ]; then
+              echo "update-type '$UPDATE_TYPE' is not in the allowlist '$ALLOWED'"; return 1
+            fi
+
+            # fetch-metadata derives the ecosystem from the branch name
+            # (dependabot/<ecosystem>/...): `go_modules` for Go, `uv` for uv,
+            # `github_actions` for workflow bumps.
+            if [ "$ECOSYSTEM" = "github_actions" ]; then
+              echo "github-actions updates need a human merge: GITHUB_TOKEN cannot merge workflow-file changes"; return 1
+            fi
+            eco_list="$(printf '%s' "$ECOSYSTEMS" | tr -d '[:space:]')"
+            if ! printf '%s' "$eco_list" | grep -Eq '^[a-z_-]+(,[a-z_-]+)*$'; then
+              echo "invalid 'ecosystems' input: want comma-separated names matching [a-z_-]+ (e.g. go_modules,uv)"; return 1
+            fi
+            while IFS= read -r eco; do
+              if [ "$eco" = "$ECOSYSTEM" ]; then eco_ok=true; fi
+            done <<< "$(printf '%s' "$eco_list" | tr ',' '\n')"
+            if [ "$eco_ok" != "true" ]; then
+              echo "package-ecosystem '$ECOSYSTEM' is not in the allowed ecosystems '$eco_list'"; return 1
+            fi
+
+            # Excluded dependencies: any name of a (grouped) PR matching any glob refuses
+            # the whole PR. Patterns are validated first, so the unquoted `case` pattern
+            # below cannot expand anything but a glob.
+            if [ -n "$(printf '%s' "$EXCLUDE" | tr -d '[:space:],')" ]; then
+              bad="$(printf '%s\n' "$EXCLUDE" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -Ev '^$|^[A-Za-z0-9._@/*?+-]+$' || true)"
+              if [ -n "$bad" ]; then
+                echo "invalid 'exclude-dependencies' entry: only [A-Za-z0-9._@/*?+-] are allowed in a glob"; return 1
+              fi
+              if [ -z "$(printf '%s' "$DEPENDENCIES" | tr -d '[:space:],')" ]; then
+                echo "fetch-metadata reported no dependency-names; cannot check exclude-dependencies"; return 1
+              fi
+              while IFS= read -r name; do
+                [ -n "$name" ] || continue
+                while IFS= read -r pat; do
+                  [ -n "$pat" ] || continue
+                  n="$(norm_name "$name")"
+                  g="$(norm_name "$pat")"
+                  # shellcheck disable=SC2254 # the glob is the point
+                  case "$n" in
+                    $g) hits="${hits:+$hits, }'$name' (pattern '$pat')"; break ;;
+                  esac
+                done <<< "$(printf '%s\n' "$EXCLUDE" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+              done <<< "$(printf '%s\n' "$DEPENDENCIES" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+              if [ -n "$hits" ]; then
+                echo "excluded dependencies need a human review: $hits"; return 1
+              fi
+            fi
+            return 0
+          }
+          # <<< automerge-gate body
+
+          if ! reason="$(gate)"; then
+            reject "$reason"
           fi
 
           # fetch-metadata only verifies the first commit; a human could push
@@ -134,7 +211,7 @@ jobs:
 
           {
             echo "merge=true"
-            echo "reason=$UPDATE_TYPE on go_modules, all commits by dependabot[bot]"
+            echo "reason=$UPDATE_TYPE on $ECOSYSTEM, all commits by dependabot[bot]"
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify checks

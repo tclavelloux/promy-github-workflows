@@ -263,7 +263,7 @@ Requires only `pull-requests: read` — it reads the title off the event payload
 
 ## `dependabot-automerge.yml`
 
-Squash-merges a Dependabot Go-module PR once every check on its head commit is green. Tag `dependabot-automerge/v1`. Rollout and limits: [docs/dependency-automation.md](docs/dependency-automation.md).
+Squash-merges a Dependabot PR (Go modules by default; `uv` and others opt-in) once every check on its head commit is green. Tag `dependabot-automerge/v1`. Rollout and limits: [docs/dependency-automation.md](docs/dependency-automation.md).
 
 Call it as the **last job of the caller's own `ci.yml`** (`on: pull_request`), with `needs:` listing every other job:
 
@@ -282,9 +282,35 @@ Call it as the **last job of the caller's own `ci.yml`** (`on: pull_request`), w
     uses: tclavelloux/promy-github-workflows/.github/workflows/dependabot-automerge.yml@dependabot-automerge/v1
 ```
 
+Inputs (all optional; the defaults are the Go behaviour, so Go callers pass none):
+
+| Input | Default | Meaning |
+|---|---|---|
+| `merge-update-types` | `version-update:semver-patch version-update:semver-minor` | Space-separated allowlist of fetch-metadata `update-type`. A major is rejected even if listed. |
+| `ecosystems` | `go_modules` | Comma-separated allowlist of Dependabot `package-ecosystem` values (`go_modules`, `uv`, `pip`, `docker`, ...). `[a-z_-]` only; anything else refuses every PR. `github_actions` is refused even if listed. |
+| `exclude-dependencies` | empty | Newline- or comma-separated globs (`torch*`, `numpy`; `*` `?` only). One matching name in `dependency-names` refuses the whole PR, grouped or not. Case-insensitive; `.` `_` `-` are equivalent; an exact name does not match longer names (`numpy` skips `numpy-financial`). Non-empty with no `dependency-names` fails closed. |
+| `wait-attempts` / `wait-seconds` | `10` / `15` | Poll budget for check runs outside this workflow run. |
+
+Python repo (uv), as the last job of `ci.yml`:
+
+```yaml
+    uses: tclavelloux/promy-github-workflows/.github/workflows/dependabot-automerge.yml@dependabot-automerge/v1
+    with:
+      ecosystems: uv
+      exclude-dependencies: |
+        torch*
+        ultralytics*
+        opencv*
+        numpy
+        openai
+```
+
+`ecosystems` and `exclude-dependencies` need `dependabot-automerge/v1.1.0` (`/v1` moves to it). The gate logic lives in `scripts/automerge-gate.sh`, inlined in the workflow and kept byte-identical by `internal/syncheck/automerge_test.go`, which also runs the accept/refuse table through bash.
+
 Merges only when all of these hold:
 
-- Ecosystem is `gomod`; update type is patch or minor (`dependabot/fetch-metadata`, SHA-pinned).
+- Ecosystem is in `ecosystems`; update type is patch or minor (`dependabot/fetch-metadata`, SHA-pinned).
+- No dependency name matches `exclude-dependencies`.
 - Every commit on the PR is authored by `dependabot[bot]`, not only the first one fetch-metadata checks.
 - Every other check run on the head SHA is `completed` with `success`, `neutral` or `skipped`; no legacy commit status is `failure`, `error` or `pending`.
 - The head SHA is unchanged at merge time (`gh pr merge --squash --match-head-commit`).
@@ -292,6 +318,7 @@ Merges only when all of these hold:
 Never merges:
 
 - Major bumps. Rejected in the script even if listed in `merge-update-types`.
+- Ecosystems outside `ecosystems`, and PRs containing an excluded dependency.
 - `github-actions` bumps. `GITHUB_TOKEN` lacks the `workflows` permission and cannot merge workflow-file changes.
 - release-please PRs.
 - Anything a human touched (extra commit, non-Dependabot author).
