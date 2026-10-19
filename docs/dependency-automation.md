@@ -14,7 +14,7 @@ Tags: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.1.0` ar
 | Piece | File | Tag | Fixes |
 |---|---|---|---|
 | Grouped Dependabot config | `templates/dependabot.yml` | none (copied per repo) | ~30 serial go.sum-conflicting PRs become one weekly PR; indirect deps covered |
-| Automerge | `.github/workflows/dependabot-automerge.yml`, `templates/ci-automerge-job.yml` | `dependabot-automerge/v1` | Green patch/minor gomod PRs sit unmerged |
+| Automerge | `.github/workflows/dependabot-automerge.yml`, `templates/ci-automerge-job.yml` | `dependabot-automerge/v1` | Green patch/minor PRs sit unmerged (gomod by default; `ecosystems: uv` and `exclude-dependencies` from `v1.1.0`) |
 | Vuln fix | `.github/workflows/go-vuln-fix.yml`, `templates/go-vuln-fix-caller.yml` | `go-vuln-fix/v1` | Called advisories wait for a human to notice |
 | Pre-push hook | `hooks/go-vuln.sh`, `.pre-commit-hooks.yaml` | `hooks/v1.1.0` | Advisories surface only after push |
 | Local twin and CI guard | `scripts/go-vuln-fix.sh`, `.github/workflows/ci.yml` | none | Version and fix-logic drift |
