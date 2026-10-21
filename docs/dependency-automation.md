@@ -9,7 +9,7 @@
 
 ## Pieces
 
-Tags: `dependabot-automerge/v1(.0.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.1.0` are cut. `go-vuln-fix/v1.1.0` (App token, go patch bump) is cut with the move of `go-vuln-fix/v1`.
+Tags: `dependabot-automerge/v1(.0.0, .1.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.4.0` are cut (`dependabot-automerge/v1.1.0` adds the `ecosystems` and `exclude-dependencies` inputs). `go-vuln-fix/v1.1.0` (App token, go patch bump) is cut with the move of `go-vuln-fix/v1`.
 
 | Piece | File | Tag | Fixes |
 |---|---|---|---|
