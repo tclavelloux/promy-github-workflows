@@ -65,7 +65,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | `ci-projects` | Python only. `with.projects` of lint, typecheck, vuln and test is a JSON-array string listing exactly the uv projects; docker lists exactly the uv projects with a `Dockerfile`. Entries are path-cleaned (`./src/app/` = `src/app`) | A project left out has no gate; a listed directory that is not a project fails the reusable workflow |
 | `ci-test-artifact` | Go only. `test` job uploads `actions/upload-artifact` with name `coverage-profile`, path `coverage.raw.out`, `retention-days: 1`, `if-no-files-found: error` | Contract with `go-coverage.yml`; a missing profile must fail, not pass |
 | `ci-lint-sync` | `lint` job has `with.workflow-sync: true` | Without it CI skips this check and only the local hook guards the repo |
-| `ci-automerge` | If present: last job; `needs` = every other job; `if` = `github.event.pull_request.user.login == 'dependabot[bot]'`; permissions exactly `{contents: write, pull-requests: write, checks: read, actions: read, statuses: read}` | A job missing from `needs:` could merge past a red check |
+| `ci-automerge` | If present: last job; `needs` = every other job; `if` = `github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'`; permissions exactly `{contents: write, pull-requests: write, checks: read, actions: read, statuses: read}` | A job missing from `needs:` could merge past a red check |
 
 ### Other workflow files
 

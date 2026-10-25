@@ -22,7 +22,9 @@ const (
 	OSVIgnoreMaxDays = 90
 
 	// AutomergeIf: no status function, so GitHub ANDs success() implicitly.
-	AutomergeIf = "github.event.pull_request.user.login == 'dependabot[bot]'"
+	// Allowlisted bots: dependabot[bot] and promy-fleet-bot[bot] (vuln-fix PRs);
+	// keep in step with the job `if:` of dependabot-automerge.yml.
+	AutomergeIf = "github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'"
 	DraftSkipIf = "github.event.pull_request.draft == false"
 
 	ConcurrencyGroup = "${{ github.workflow }}-${{ github.ref }}"

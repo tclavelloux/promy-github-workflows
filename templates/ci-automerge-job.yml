@@ -27,7 +27,9 @@ jobs:
     needs: [lint, vuln]
     # No status function here, so GitHub implicitly ANDs success(): any failed,
     # cancelled or skipped need skips this job.
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    # Allowlisted bots: Dependabot, and promy-fleet-bot (go-vuln-fix and
+    # python-vuln-fix PRs, merged only when the diff is a patch-level bump).
+    if: github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'
     # Must match the reusable workflow's permissions exactly; it can only narrow.
     permissions:
       contents: write
