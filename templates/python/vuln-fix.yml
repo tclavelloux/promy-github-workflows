@@ -1,0 +1,48 @@
+# Canonical .github/workflows/vuln-fix.yml for a uv-managed Python repo
+# (workflow-sync Python profile; the file is optional). Weekly, patches the
+# advisories osv-scanner reports in each uv.lock and opens one `fix(deps)` PR.
+# Advisories it will not patch land in one rolling issue.
+#
+# - `projects`: every directory with a tracked uv.lock, as in ci.yml. workflow-sync's
+#   vuln-fix rule enforces it. Replace src/app and src/worker with your project
+#   directories.
+# - The PR is never merged for you: a human merges it.
+name: Vuln fix
+
+on:
+  schedule:
+    # Weekly, Thursday 06:17 UTC. Offset from Dependabot's Monday sweep to halve
+    # worst-case latency; an off-the-hour minute avoids scheduler congestion.
+    - cron: '17 6 * * 4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-vuln-fix
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    # Must match the reusable workflow's permissions exactly; it can only narrow.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-vuln-fix.yml@python-vuln-fix/v1
+    with:
+      projects: '["src/app","src/worker"]'
+      # Never moved by this workflow; the advisory goes to the rolling issue.
+      # Mirror the exclusion of the Dependabot automerge job, if the repo has one.
+      exclude-dependencies: |
+        torch*
+        ultralytics*
+        opencv*
+        numpy
+        openai
+    # Optional. Without them the fix PR is opened with GITHUB_TOKEN and CI does
+    # not run on it. Map explicitly; never `secrets: inherit`.
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

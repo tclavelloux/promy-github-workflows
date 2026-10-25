@@ -15,12 +15,13 @@ var (
 	ctxInShell  = regexp.MustCompile(`\$\{\{[^}]*\b(inputs|matrix|secrets|github\.event)\b`)
 )
 
-// A reusable workflow cannot read its own files at the caller's pinned ref, so two
+// A reusable workflow cannot read its own files at the caller's pinned ref, so three
 // scripts are inlined into the workflows. These tests keep each pair byte-identical.
 func TestPythonInlinedBodiesMatchScripts(t *testing.T) {
 	cases := []struct{ script, workflow, marker string }{
 		{"scripts/python_pins.py", ".github/workflows/python-lint.yml", "python-pins body"},
 		{"scripts/python_coverage_floor.py", ".github/workflows/python-test.yml", "python-coverage-floor body"},
+		{"scripts/python_vuln_fix.py", ".github/workflows/python-vuln-fix.yml", "python-vuln-fix body"},
 	}
 	for _, c := range cases {
 		want := markedBlock(t, string(govRead(t, c.script)), c.marker, c.script)
@@ -111,5 +112,81 @@ func TestPythonWorkflowsHardRules(t *testing.T) {
 				t.Errorf("%s job %s has %d checkouts, want 1", rel, jid, checkouts)
 			}
 		}
+	}
+}
+
+// python-vuln-fix.yml is the one Python workflow that writes: it cannot share the
+// read-only rules above, so its own hard rules live here.
+func TestPythonVulnFixHardRules(t *testing.T) {
+	const rel = ".github/workflows/python-vuln-fix.yml"
+	doc := govYAML(t, rel)
+
+	if p, ok := readPerms(val(doc, "permissions")); !ok || !p.equal(PermsVulnFixJob) {
+		t.Errorf("%s top-level permissions = %s, want %s (policy.go PermsVulnFixJob)", rel, describePerms(val(doc, "permissions")), PermsVulnFixJob)
+	}
+	secrets := path(doc, "on", "workflow_call", "secrets")
+	if got := keys(secrets); !equalStrings(got, vulnFixSecrets) {
+		t.Errorf("%s declares workflow_call secrets %v, want exactly %v", rel, got, vulnFixSecrets)
+	}
+	for _, name := range keys(secrets) {
+		if !isBool(path(secrets, name, "required"), false) {
+			t.Errorf("%s secret %s must be `required: false`: the App is optional", rel, name)
+		}
+	}
+	jobs := val(doc, "jobs")
+	if got := keys(jobs); len(got) != 1 || got[0] != "fix" {
+		t.Fatalf("%s jobs = %v, want the single job \"fix\"", rel, got)
+	}
+	job := val(jobs, "fix")
+	if val(job, "permissions") != nil {
+		t.Errorf("%s job fix sets permissions; the top-level grant applies", rel)
+	}
+	if scalar(val(job, "timeout-minutes")) == "" {
+		t.Errorf("%s job fix has no timeout-minutes", rel)
+	}
+	checkouts := 0
+	for _, step := range val(job, "steps").Content {
+		step = deref(step)
+		if run := scalar(val(step, "run")); ctxInShell.MatchString(run) {
+			t.Errorf("%s step %q interpolates a context into run:; pass it through env:", rel, scalar(val(step, "name")))
+		}
+		uses := scalar(val(step, "uses"))
+		if uses == "" {
+			continue
+		}
+		if !shaPinned.MatchString(uses) {
+			t.Errorf("%s uses %q, want <action>@<40 hex>", rel, uses)
+		}
+		if _, v := get(step, "uses"); v != nil && !versionNote.MatchString(v.LineComment) {
+			t.Errorf("%s uses %q without a trailing `# vX.Y.Z` comment (got %q)", rel, uses, v.LineComment)
+		}
+		if strings.HasPrefix(uses, "actions/checkout@") {
+			checkouts++
+			if !isBool(path(step, "with", "persist-credentials"), false) {
+				t.Errorf("%s checkout without `persist-credentials: false`", rel)
+			}
+		}
+	}
+	if checkouts != 1 {
+		t.Errorf("%s has %d checkouts, want 1", rel, checkouts)
+	}
+}
+
+// python-vuln-fix.yml installs the same osv-scanner as python-vuln.yml and the
+// hook (.osv-scanner-version): a different scanner would disagree with the `vuln`
+// job on what is fixed.
+func TestPythonVulnFixOSVDefaultsMatchPythonVuln(t *testing.T) {
+	def := func(rel, input string) string {
+		return scalar(path(govYAML(t, rel), "on", "workflow_call", "inputs", input, "default"))
+	}
+	for _, input := range []string{"osv-scanner-version", "osv-scanner-sha256"} {
+		fix, vuln := def(".github/workflows/python-vuln-fix.yml", input), def(".github/workflows/python-vuln.yml", input)
+		if fix == "" || fix != vuln {
+			t.Errorf("python-vuln-fix.yml %s default = %q but python-vuln.yml has %q; change both together", input, fix, vuln)
+		}
+	}
+	pin := strings.TrimPrefix(strings.TrimSpace(string(govRead(t, ".osv-scanner-version"))), "v")
+	if got := strings.TrimPrefix(def(".github/workflows/python-vuln-fix.yml", "osv-scanner-version"), "v"); got != pin {
+		t.Errorf("python-vuln-fix.yml osv-scanner-version default = %s but .osv-scanner-version = %s", got, pin)
 	}
 }

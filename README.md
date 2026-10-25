@@ -146,6 +146,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `python-vuln.yml` | `python-vuln/v1` | New; own tag namespace. `OSVScannerVersion` in `policy.go` ties to its default. |
 | `python-test.yml` | `python-test/v1` | New; own tag namespace. |
 | `python-docker.yml` | `python-docker/v1` | New; own tag namespace. |
+| `python-vuln-fix.yml` | `python-vuln-fix/v1` | New; own tag namespace. Writes (App token, PR, issue), so it is not one of the five read-only Python workflows. `OSVScannerVersion` in `policy.go` and `python-vuln.yml` tie to its `osv-scanner-*` defaults. `workflow-sync` checks its caller from `hooks/v1.5.0`. |
 | `.pre-commit-hooks.yaml` | `hooks/v1.4.0` (latest: adds `py-vuln` and the Python profile of `workflow-sync`; `hooks/v1.3.0` accepts the go-vuln-fix App secrets; `hooks/v1.2.0` added `workflow-sync`; `hooks/v1.1.0` added `go-vuln`) | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
@@ -409,6 +410,85 @@ Every run, clean ones included, emits `::notice title=vuln-record::<date> <repo>
 GH_TOKEN= gh run list --workflow "Vuln fix" --limit 50 --json databaseId -q '.[].databaseId' \
   | xargs -I{} sh -c 'gh run view {} --log 2>/dev/null | grep vuln-record'
 ```
+
+## `python-vuln-fix.yml`
+
+Weekly, patches the advisories osv-scanner reports in each project's `uv.lock` and opens one `fix(deps)` PR. Python twin of `go-vuln-fix`. Tag `python-vuln-fix/v1`.
+
+```yaml
+name: Vuln fix
+
+on:
+  schedule:
+    - cron: '17 6 * * 4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-vuln-fix
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-vuln-fix.yml@python-vuln-fix/v1
+    with:
+      projects: '["src/app","src/worker"]'
+      exclude-dependencies: |
+        torch*
+        numpy
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+```
+
+Behaviour:
+
+- Per project, scan `uv.lock` (config lookup as in `python-vuln.yml`). Per vulnerable package, the target is the highest of the lowest fixed versions across its advisory groups, taken from OSV `ECOSYSTEM` ranges that contain the installed version (`GIT` ranges are ignored).
+- Each package: `uv lock --upgrade-package <pkg>==<target>` in the project directory, one package at a time, lock restored on any refusal. Only `uv.lock` changes: never `pyproject.toml`, a Dockerfile or a requirement.
+- Refused without calling uv:
+  - `exclude-dependencies` match (PEP 503-normalised globs, whole-name: `numpy` does not match `numpy-financial`).
+  - A major bump (first release segment rises) unless `allow-major: true`. Calendar versions (first segment >= 1000 on both sides, e.g. certifi `2024.2.2` -> `2026.10.19`) are never a major.
+  - An advisory with no fixed version.
+- Refused after calling uv, lock restored: uv says `No solution found` or `unsatisfiable` (the fix is outside the project's own constraints); the resolver picked another version; the change drags an excluded or major dependency along.
+- Any other uv failure (network, index, broken lock) fails the run and restores every lock. Nothing is closed or rejected on a failed run.
+- Other side effects of a bump (patch or minor moves of other packages) are kept and listed under the PR's "Also moved by the resolver".
+- Verification: osv-scanner rescans each patched lock. A claimed ID still reported restores that whole project's lock and goes to the issue.
+- Refusals and aborts: one rolling issue per repo, marker `<!-- python-vuln-fix:unfixed -->`, title `security: Python advisories need a human`, table `project | package installed | ids | max severity | fixed | reason`. Never closed automatically.
+- Dedupe: branch `fix/py-vuln-<12 hex of sha256 over the sorted project/ID pairs>`. An open PR on that branch skips the run. A **closed-unmerged** PR on that branch means rejected and is never retried.
+- A new PR closes older open `fix/py-vuln-*` PRs by `github-actions[bot]` or the App as superseded. A run that finds nothing to fix (Dependabot or a human landed it first) closes open `fix/py-vuln-*` PRs opened by a bot as stale, only when the scan completed and nothing aborted.
+- The commit goes through GraphQL `createCommitOnBranch` (GitHub-signed, no credentials on disk), one commit with every changed lock.
+- Never merges, never enables auto-merge. A caller's Dependabot automerge job requires `dependabot[bot]`, so a human merges the fix PR.
+- uv version: read from the caller's `.uv-version` (same validation as `python-lint.yml`). A lock last written by a newer uv gets that uv's lock style when a resolution runs: keep the fleet pin at the version Dependabot uses.
+- With `APP_CLIENT_ID` and `APP_PRIVATE_KEY`, the PR and commit are authored by the App, so **CI runs on the PR**. Without them the PR is opened with `GITHUB_TOKEN`, **CI does not run on it** and the PR body says so. Close and reopen the PR before merging. A failed token mint fails the run. The issue always uses `GITHUB_TOKEN`.
+- The fix logic is inlined in the workflow; `scripts/python_vuln_fix.py` is its locally testable twin, and the Go tests keep the two blocks byte-identical. Exit codes: 0 completed, 2 usage or scanner error, 4 uv error that is not a refusal.
+
+### Inputs
+
+| Input | Default | Purpose |
+|---|---|---|
+| `projects` | required | JSON array of uv project directories, each with a tracked `uv.lock` (same input as `python-vuln.yml`; `workflow-sync` requires every uv project) |
+| `osv-scanner-version` | `2.6.0` | Must equal `python-vuln.yml`'s default and `.osv-scanner-version`; Go tests enforce it |
+| `osv-scanner-sha256` | `ca69b3d3...b108` | sha256 of the `osv-scanner_linux_amd64` asset; must equal `python-vuln.yml`'s default |
+| `exclude-dependencies` | `''` | Newline- or comma-separated globs this workflow never moves; same syntax as `dependabot-automerge`'s input |
+| `allow-major` | `false` | Let a fix cross a major version |
+| `base-branch` | `''` (repo default branch) | Branch to scan and open the PR against |
+
+### Secrets
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `APP_CLIENT_ID` | no | Client ID of the fleet GitHub App (installed on the repo, `contents` + `pull-requests` write) |
+| `APP_PRIVATE_KEY` | no | Private key of that App |
+
+Map them explicitly as in the snippet; never `secrets: inherit` (`workflow-sync` rejects it). The caller job must grant `contents: write`, `pull-requests: write`, `issues: write` exactly.
+
+Every run emits `::notice title=vuln-record::<date> <repo> <IDs|none> <action>` and a step-summary row.
 
 ## Python workflows
 

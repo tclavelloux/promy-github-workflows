@@ -104,10 +104,6 @@ func (c *checker) checkVulnFix() {
 	if !p.exists || p.root == nil {
 		return // optional file
 	}
-	if c.prof == pythonProfile {
-		c.add(vulnFixFile, 1, ruleVulnFix, "go-vuln-fix is Go-only; a Python repo gets advisory fixes from Dependabot security updates (uv-security group): delete this file")
-		return
-	}
 	root := p.root
 	k, on := get(root, "on")
 	names := setOf(onNames(on)...)
@@ -124,9 +120,10 @@ func (c *checker) checkVulnFix() {
 	c.wantPerms(vulnFixFile, line(pk, 1), ruleVulnFix, "top-level", pn, PermsRead)
 
 	ck, cn := get(root, "concurrency")
-	if scalar(val(cn, "group")) != "go-vuln-fix" || !isBool(val(cn, "cancel-in-progress"), false) {
-		c.add(vulnFixFile, line(ck, 1), ruleVulnFix, "concurrency = {group: %q, cancel-in-progress: %q}; want {group: go-vuln-fix, cancel-in-progress: false} so a running fix is never cancelled mid-PR",
-			scalar(val(cn, "group")), scalar(val(cn, "cancel-in-progress")))
+	wf := c.prof.vulnFixWorkflow
+	if scalar(val(cn, "group")) != wf || !isBool(val(cn, "cancel-in-progress"), false) {
+		c.add(vulnFixFile, line(ck, 1), ruleVulnFix, "concurrency = {group: %q, cancel-in-progress: %q}; want {group: %s, cancel-in-progress: false} so a running fix is never cancelled mid-PR",
+			scalar(val(cn, "group")), scalar(val(cn, "cancel-in-progress")), wf)
 	}
 	job := c.singleJob(vulnFixFile, ruleVulnFix, root, "fix")
 	if job == nil {
@@ -134,10 +131,41 @@ func (c *checker) checkVulnFix() {
 	}
 	jk, jn := get(job, "permissions")
 	c.wantPerms(vulnFixFile, line(jk, line(job, 1)), ruleVulnFix, `job "fix"`, jn, PermsVulnFixJob)
-	if u := val(job, "uses"); u == nil || u.Value != govRef("go-vuln-fix") {
-		c.add(vulnFixFile, line(u, line(job, 1)), ruleVulnFix, `job "fix" uses %q; want %s`, scalar(u), govRef("go-vuln-fix"))
+	if u := val(job, "uses"); u == nil || u.Value != govRef(wf) {
+		c.add(vulnFixFile, line(u, line(job, 1)), ruleVulnFix, `job "fix" uses %q; want %s`, scalar(u), govRef(wf))
+	}
+	if c.prof == pythonProfile {
+		c.checkVulnFixProjects(job)
 	}
 	c.checkVulnFixSecrets(job)
+}
+
+// checkVulnFixProjects requires the Python caller's with.projects to list every
+// uv project: a project left out is never patched.
+func (c *checker) checkVulnFixProjects(job *yaml.Node) {
+	want := c.uvProjects()
+	n := path(job, "with", "projects")
+	got, err := parseProjects(n)
+	if err != nil {
+		c.add(vulnFixFile, line(n, line(job, 1)), ruleVulnFix, `job "fix" with.projects is %s; want '%s' (every uv project (a directory with a tracked uv.lock))`, err, jsonList(want))
+		return
+	}
+	gotSet, wantSet := setOf(got...), setOf(want...)
+	var missing, unknown []string
+	for _, d := range want {
+		if !gotSet[d] {
+			missing = append(missing, d)
+		}
+	}
+	for _, d := range sortedKeys(gotSet) {
+		if !wantSet[d] {
+			unknown = append(unknown, d)
+		}
+	}
+	if len(missing)+len(unknown) > 0 {
+		c.add(vulnFixFile, n.Line, ruleVulnFix, `job "fix" with.projects = %s; want '%s', every uv project (a directory with a tracked uv.lock) (missing: [%s], unknown: [%s]); a project left out is never patched`,
+			n.Value, jsonList(want), strings.Join(missing, ", "), strings.Join(unknown, ", "))
+	}
 }
 
 // vulnFixSecrets are the only secrets job "fix" may pass: the GitHub App

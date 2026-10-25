@@ -1,0 +1,167 @@
+{
+  "results": [
+    {
+      "packages": [
+        {
+          "groups": [
+            {
+              "aliases": [
+                "CVE-2024-39689",
+                "GHSA-248v-346w-9cwc",
+                "PYSEC-2024-230"
+              ],
+              "ids": [
+                "PYSEC-2024-230",
+                "GHSA-248v-346w-9cwc"
+              ],
+              "max_severity": "7.5"
+            },
+            {
+              "aliases": [
+                "GHSA-6q48-6c7w-9gw2",
+                "PYSEC-2026-4320"
+              ],
+              "ids": [
+                "PYSEC-2026-4320",
+                "GHSA-6q48-6c7w-9gw2"
+              ],
+              "max_severity": "9.1"
+            }
+          ],
+          "package": {
+            "ecosystem": "PyPI",
+            "name": "certifi",
+            "version": "2024.2.2"
+          },
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "certifi"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "bd8153872e9c6fc98f4023df9c2deaffea2fa463"
+                        }
+                      ],
+                      "type": "GIT"
+                    },
+                    {
+                      "events": [
+                        {
+                          "introduced": "2021.5.30"
+                        },
+                        {
+                          "fixed": "2024.7.4"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2024-39689",
+                "GHSA-248v-346w-9cwc"
+              ],
+              "id": "PYSEC-2024-230"
+            },
+            {
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "certifi"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "2019.03.09"
+                        },
+                        {
+                          "fixed": "2026.10.19"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "GHSA-6q48-6c7w-9gw2"
+              ],
+              "id": "PYSEC-2026-4320"
+            },
+            {
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "certifi"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "2021.5.30"
+                        },
+                        {
+                          "fixed": "2024.7.4"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2024-39689",
+                "PYSEC-2024-230"
+              ],
+              "id": "GHSA-248v-346w-9cwc"
+            },
+            {
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "certifi"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "2019.03.09"
+                        },
+                        {
+                          "fixed": "2026.10.19"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "PYSEC-2026-4320"
+              ],
+              "id": "GHSA-6q48-6c7w-9gw2"
+            }
+          ]
+        }
+      ],
+      "source": {
+        "path": "uv.lock",
+        "type": "lockfile"
+      }
+    }
+  ]
+}

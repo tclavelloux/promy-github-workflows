@@ -163,9 +163,30 @@ func TestPythonDrift(t *testing.T) {
 		{name: "projects not JSON", edits: []edit{ed(ciRel, "python-vuln/v1\n    with:\n      projects: "+bothProjects, "python-vuln/v1\n    with:\n      projects: src/app")}, rules: []string{"ci-projects"}, msg: "is not a JSON array"},
 		{name: "projects as YAML list", edits: []edit{ed(ciRel, "python-vuln/v1\n    with:\n      projects: "+bothProjects, "python-vuln/v1\n    with:\n      projects: [src/app, src/worker]")}, rules: []string{"ci-projects"}, msg: "not a string"},
 		{name: "projects absent", edits: []edit{ed(ciRel, "python-typecheck/v1\n    with:\n      projects: "+bothProjects+"\n", "python-typecheck/v1\n")}, rules: []string{"ci-projects"}, msg: "is absent"},
-		{name: "vuln-fix.yml in a Python repo", do: func(t *testing.T, r string) {
-			writeFile(t, r, vfRel, readFile(t, "testdata/pass-rollout", vfRel))
-		}, rules: []string{"vuln-fix"}, msg: "Go-only"},
+		{name: "vuln-fix.yml from the template passes", do: func(t *testing.T, r string) {
+			writeFile(t, r, vfRel, pyVulnFixTemplate(t))
+		}},
+		{name: "vuln-fix.yml calls go-vuln-fix", do: func(t *testing.T, r string) {
+			writeVulnFix(t, r, "python-vuln-fix.yml@python-vuln-fix/v1", "go-vuln-fix.yml@go-vuln-fix/v1")
+		}, rules: []string{"vuln-fix"}, msg: "python-vuln-fix.yml@python-vuln-fix/v1"},
+		{name: "vuln-fix.yml concurrency group go-vuln-fix", do: func(t *testing.T, r string) {
+			writeVulnFix(t, r, "group: python-vuln-fix", "group: go-vuln-fix")
+		}, rules: []string{"vuln-fix"}, msg: "want {group: python-vuln-fix, cancel-in-progress: false}"},
+		{name: "vuln-fix.yml projects omit a project", do: func(t *testing.T, r string) {
+			writeVulnFix(t, r, bothProjects, `'["src/app"]'`)
+		}, rules: []string{"vuln-fix"}, msg: "missing: [src/worker]"},
+		{name: "vuln-fix.yml projects list an unknown project", do: func(t *testing.T, r string) {
+			writeVulnFix(t, r, bothProjects, `'["src/app","src/worker","src/nope"]'`)
+		}, rules: []string{"vuln-fix"}, msg: "unknown: [src/nope]"},
+		{name: "vuln-fix.yml projects absent", do: func(t *testing.T, r string) {
+			writeVulnFix(t, r, "      projects: "+bothProjects+"\n", "")
+		}, rules: []string{"vuln-fix"}, msg: "with.projects is absent"},
+		{name: "vuln-fix.yml projects not JSON", do: func(t *testing.T, r string) {
+			writeVulnFix(t, r, bothProjects, "src/app")
+		}, rules: []string{"vuln-fix"}, msg: "is not a JSON array"},
+		{name: "vuln-fix.yml secrets inherit", do: func(t *testing.T, r string) {
+			writeVulnFix(t, r, "    secrets:\n      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}\n      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}\n", "    secrets: inherit\n")
+		}, rules: []string{"vuln-fix"}, msg: "least privilege"},
 		// dependabot.yml
 		{name: "uv entry dropped", edits: []edit{ed(depRel, "package-ecosystem: uv", "package-ecosystem: pip")}, rules: []string{"dependabot"}, msg: `no "uv" updates entry covers /src/app, /src/worker`},
 		{name: "uv entry misses a project", edits: []edit{ed(depRel, "  - package-ecosystem: uv\n    directories:\n      - /src/app\n      - /src/worker\n", "  - package-ecosystem: uv\n    directories:\n      - /src/app\n")}, rules: []string{"dependabot"}, msg: `no "uv" updates entry covers /src/worker`},
@@ -260,6 +281,21 @@ func TestPythonExemptionInTOML(t *testing.T) {
 	}
 }
 
+func pyVulnFixTemplate(t *testing.T) string {
+	t.Helper()
+	return string(govRead(t, "templates/python/vuln-fix.yml"))
+}
+
+// writeVulnFix installs the Python vuln-fix template into the repo with one edit.
+func writeVulnFix(t *testing.T, root, old, new string) {
+	t.Helper()
+	tmpl := pyVulnFixTemplate(t)
+	if !strings.Contains(tmpl, old) {
+		t.Fatalf("templates/python/vuln-fix.yml does not contain %q", old)
+	}
+	writeFile(t, root, vfRel, strings.Replace(tmpl, old, new, 1))
+}
+
 // templates/python must pass the Python profile as-is.
 func TestTemplatesPython(t *testing.T) {
 	root := fixture(t, pyPassFixture)
@@ -268,6 +304,7 @@ func TestTemplatesPython(t *testing.T) {
 		"templates/python/dependabot.yml":         depRel,
 		"templates/python/pre-commit-config.yaml": pcRel,
 		"templates/python/Makefile":               mkRel,
+		"templates/python/vuln-fix.yml":           vfRel,
 	} {
 		writeFile(t, root, dst, string(govRead(t, tmpl)))
 	}

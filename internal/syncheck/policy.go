@@ -42,6 +42,7 @@ var WorkflowMajors = map[string]int{
 	"python-vuln":          1,
 	"python-test":          1,
 	"python-docker":        1,
+	"python-vuln-fix":      1,
 }
 
 var CommitTypes = []string{"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"}
