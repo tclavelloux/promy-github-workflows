@@ -15,7 +15,7 @@ const (
 	// .uv-version to equal these; python-lint ties every other pin to those files.
 	RuffVersion       = "0.17.0"  // python-lint.yml ruff-version default
 	OSVScannerVersion = "2.6.0"   // python-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln hook)
-	UVVersion         = "0.11.13" // fleet uv pin; templates/python/pre-commit-config.yaml uv-pre-commit rev
+	UVVersion         = "0.12.18" // fleet uv pin; templates/python/pre-commit-config.yaml uv-pre-commit rev
 
 	// OSVIgnoreMaxDays bounds every osv-scanner ignore: Python has no
 	// reachability analysis, so an ignore must expire and be re-triaged.

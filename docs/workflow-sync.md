@@ -110,7 +110,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 
 | Rule | File | Invariant | Why |
 |---|---|---|---|
-| `uv-version` | `.uv-version` | Equals `UVVersion` (`0.11.13`), leading `v` ignored | The fleet's uv decision; python-lint ties the uv-pre-commit rev, `[tool.uv] required-version` floors and Dockerfile uv tags to this file |
+| `uv-version` | `.uv-version` | Equals `UVVersion` (`0.12.18`), leading `v` ignored | The fleet's uv decision; python-lint ties the uv-pre-commit rev, `[tool.uv] required-version` floors and Dockerfile uv tags to this file |
 | `ruff-version` | `.ruff-version`, `.pre-commit-config.yaml` | `.ruff-version` equals `RuffVersion` (`0.17.0`, the python-lint default); an `astral-sh/ruff-pre-commit` entry exists with `rev: v0.17.0` | Local ruff equals CI ruff. python-lint only warns on this drift; the pinned hook rev makes the bump deliberate |
 | `python-version` | `<project>/.python-version` | Exists in every uv project and starts with `X.Y` | uv, `requires-python` and `FROM python:X.Y` read it; python-lint compares them |
 | `poetry-lock` | any `poetry.lock` | None tracked | uv is the toolchain; a stale lock misleads Dependabot and scanners |
