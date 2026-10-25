@@ -147,6 +147,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `python-test.yml` | `python-test/v1` | New; own tag namespace. |
 | `python-docker.yml` | `python-docker/v1` | New; own tag namespace. |
 | `python-vuln-fix.yml` | `python-vuln-fix/v1` | New; own tag namespace. Writes (App token, PR, issue), so it is not one of the five read-only Python workflows. `OSVScannerVersion` in `policy.go` and `python-vuln.yml` tie to its `osv-scanner-*` defaults. `workflow-sync` checks its caller from `hooks/v1.5.0`. |
+| `release-please.yml` | `release-please/v1` | New; own tag namespace. `workflow-sync` checks its caller from `hooks/v1.6.0`. |
 | `.pre-commit-hooks.yaml` | `hooks/v1.4.0` (latest: adds `py-vuln` and the Python profile of `workflow-sync`; `hooks/v1.3.0` accepts the go-vuln-fix App secrets; `hooks/v1.2.0` added `workflow-sync`; `hooks/v1.1.0` added `go-vuln`) | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
@@ -337,6 +338,74 @@ A non-merge decision exits 0 with a `::notice` and a step summary. A red check w
 Needs `contents: write`, `pull-requests: write`, `checks: read`, `actions: read`, `statuses: read`. The caller job must grant exactly these; a called workflow can only narrow them.
 
 The squash commit is pushed by `GITHUB_TOKEN`, so it starts no workflows. release-please's `push: main` run does not fire until the next human merge, which refreshes its PR. Nothing is lost: release-please scans every commit since the last release, and `build(deps)` commits are non-releasing.
+
+## `release-please.yml`
+
+Opens and updates the release PR from the Conventional Commits on `main`, and cuts the tag and GitHub release when it merges. Tag `release-please/v1`.
+
+```yaml
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: tclavelloux/promy-github-workflows/.github/workflows/release-please.yml@release-please/v1
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+```
+
+Canonical caller: `templates/release-please.yml`. `workflow-sync` requires this shape. Set `config-file` / `manifest-file` under `with:` only if the repo keeps them elsewhere.
+
+Behaviour:
+
+- With `APP_CLIENT_ID` and `APP_PRIVATE_KEY`, the release PR is opened with a GitHub App installation token (`actions/create-github-app-token`, scoped to the calling repo, `contents` + `pull-requests` write), so **CI runs on it**. A failed token mint fails the run.
+- Without the secrets, the PR is opened with `GITHUB_TOKEN`: **CI does not run on it**, and the run emits a `::warning title=release-please::` annotation. Close and reopen the PR (fires `reopened`) before merging.
+- The release PR branch is `release-please--branches--main--components--<package-name>` whenever `package-name` is set. `include-component-in-tag` changes the tag and PR title format, not the branch.
+- Release PRs are never auto-merged. Cutting a release stays a human decision.
+- Tags and releases created with the App token trigger `push: tags` and `release` workflows in the caller, unlike `GITHUB_TOKEN`.
+- Runs are serialized in the `release-please` concurrency group, never cancelled mid-run.
+- No checkout: release-please works through the API.
+
+### Inputs
+
+| Input | Default | Purpose |
+|---|---|---|
+| `config-file` | `release-please-config.json` | Path to the release-please config in the caller repo |
+| `manifest-file` | `.release-please-manifest.json` | Path to the release-please manifest in the caller repo |
+
+### Secrets
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `APP_CLIENT_ID` | no | Client ID of the fleet GitHub App (installed on the repo, `contents` + `pull-requests` write) |
+| `APP_PRIVATE_KEY` | no | Private key of that App |
+
+Map them explicitly as in the snippet; never `secrets: inherit` (`workflow-sync` rejects it).
+
+### Outputs
+
+| Output | Purpose |
+|---|---|
+| `releases_created` | `true` when at least one release was created |
+| `release_created` | `true` when a release was created for the root path |
+| `tag_name` | Tag of the root-path release |
+| `version` | Version of the root-path release |
+| `sha` | Commit SHA the root-path release was cut from |
+| `prs_created` | `true` when at least one release PR was created or updated |
+| `pr` | JSON of the release PR (head branch, number, title, body) |
+| `paths_released` | JSON array of the paths released |
+
+Needs `contents: write` and `pull-requests: write`; the caller job must grant exactly these.
 
 ## `go-vuln-fix.yml`
 

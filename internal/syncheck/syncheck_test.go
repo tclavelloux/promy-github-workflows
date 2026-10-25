@@ -74,7 +74,9 @@ func TestDrift(t *testing.T) {
 		{name: "sha without version comment", edits: []edit{ed(ciRel, checkoutSHA, "3d3c42e5aac5ba805825da76410c181273ba90b1\n")}, rules: []string{"sha-pin"}, msg: "no trailing"},
 		{name: "uppercase sha", edits: []edit{ed(ciRel, "3d3c42e5aac5ba805825da76410c181273ba90b1", "3D3C42E5AAC5BA805825DA76410C181273BA90B1")}, rules: []string{"sha-pin"}, msg: "lowercase"},
 		{name: "checkout persist-credentials", edits: []edit{ed(ciRel, checkoutSHA+"        with:\n          persist-credentials: false\n", checkoutSHA)}, rules: []string{"persist-credentials"}, msg: "persist-credentials: false"},
-		{name: "workflow without permissions", edits: []edit{ed(rpRel, "permissions:\n  contents: write\n  pull-requests: write\n\n", "")}, rules: []string{"workflow-permissions"}, msg: "no top-level permissions"},
+		{name: "workflow without permissions", do: func(t *testing.T, r string) {
+			writeFile(t, r, ".github/workflows/x.yml", strings.Replace(minimalWF, "permissions:\n  contents: read\n", "", 1)+"      - run: echo hi\n")
+		}, rules: []string{"workflow-permissions"}, msg: "no top-level permissions"},
 		{name: "pull_request_target", do: func(t *testing.T, r string) {
 			writeFile(t, r, ".github/workflows/x.yml", strings.Replace(minimalWF, "on: push", "on: [push, pull_request_target]", 1)+"      - run: echo hi\n")
 		}, rules: []string{"dangerous-trigger"}, msg: `"pull_request_target"`},
@@ -114,6 +116,17 @@ func TestDrift(t *testing.T) {
 		{name: "pr-title.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, prRel)) }, rules: []string{"pr-title"}, msg: "file missing"},
 		{name: "release-please.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, rpRel)) }, rules: []string{"release-please"}, msg: "file missing"},
 		{name: "release-please extra trigger", edits: []edit{ed(rpRel, "on:\n  push:", "on:\n  workflow_dispatch:\n  push:")}, rules: []string{"release-please"}, msg: "want exactly"},
+		{name: "release-please local copy", do: func(t *testing.T, r string) {
+			writeFile(t, r, rpRel, "name: Release Please\n\non:\n  push:\n    branches: [main]\n\npermissions:\n  contents: read\n\njobs:\n  release-please:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n      pull-requests: write\n    steps:\n      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0\n")
+		}, rules: []string{"release-please"}, msg: "runs release-please locally"},
+		{name: "release-please wrong ref", edits: []edit{ed(rpRel, "@release-please/v1", "@main")}, rules: []string{"governance-ref", "release-please"}, msg: "release-please.yml@release-please/v1"},
+		{name: "release-please wrong job permissions", edits: []edit{ed(rpRel, "      pull-requests: write\n", "")}, rules: []string{"release-please"}, msg: `job "release-please" permissions`},
+		{name: "release-please top-level write", edits: []edit{ed(rpRel, "permissions:\n  contents: read", "permissions:\n  contents: write")}, rules: []string{"release-please"}, msg: "top-level"},
+		{name: "release-please secrets inherit", edits: []edit{ed(rpRel, "    secrets:\n      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}\n      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}\n", "    secrets: inherit\n")}, rules: []string{"release-please"}, msg: "explicit mapping"},
+		{name: "release-please secrets extra key", edits: []edit{ed(rpRel, "      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}\n", "      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}\n      FOO: ${{ secrets.FOO }}\n")}, rules: []string{"release-please"}, msg: "want exactly"},
+		{name: "release-please secrets absent passes", edits: []edit{ed(rpRel, "    secrets:\n      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}\n      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}\n", "")}},
+		{name: "release-please wrong job name", edits: []edit{ed(rpRel, "  release-please:\n    # Must", "  release:\n    # Must")}, rules: []string{"release-please"}, msg: "want exactly one job"},
+		{name: "release-please two jobs", edits: []edit{ed(rpRel, "jobs:\n", "jobs:\n  other:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n")}, rules: []string{"release-please"}, msg: "want exactly one job"},
 		{name: "dependabot missing gomod", edits: []edit{ed(depRel, "package-ecosystem: gomod", "package-ecosystem: pip")}, rules: []string{"dependabot"}, msg: `"gomod"`},
 		{name: "dependabot.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, depRel)) }, rules: []string{"dependabot"}, msg: "file missing"},
 		{name: "vuln-fix wrong permissions", base: "pass-rollout", edits: []edit{ed(vfRel, "issues: write", "issues: read")}, rules: []string{"vuln-fix"}, msg: `job "fix" permissions`},

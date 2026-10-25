@@ -125,8 +125,8 @@ func TestPythonVulnFixHardRules(t *testing.T) {
 		t.Errorf("%s top-level permissions = %s, want %s (policy.go PermsVulnFixJob)", rel, describePerms(val(doc, "permissions")), PermsVulnFixJob)
 	}
 	secrets := path(doc, "on", "workflow_call", "secrets")
-	if got := keys(secrets); !equalStrings(got, vulnFixSecrets) {
-		t.Errorf("%s declares workflow_call secrets %v, want exactly %v", rel, got, vulnFixSecrets)
+	if got := keys(secrets); !equalStrings(got, appSecrets) {
+		t.Errorf("%s declares workflow_call secrets %v, want exactly %v", rel, got, appSecrets)
 	}
 	for _, name := range keys(secrets) {
 		if !isBool(path(secrets, name, "required"), false) {

@@ -1,21 +1,25 @@
+# Canonical .github/workflows/release-please.yml for every fleet repo: Go,
+# Python, and promy-frontend (copy by hand; it has no workflow-sync profile).
 name: Release Please
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Release Please
-        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          manifest-file: .release-please-manifest.json
-          config-file: release-please-config.json
+    # Must match the reusable workflow's permissions exactly; it can only narrow.
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: tclavelloux/promy-github-workflows/.github/workflows/release-please.yml@release-please/v1
+    # Defaults match the fleet. Set `config-file` / `manifest-file` under `with:`
+    # only if the repo keeps them elsewhere.
+    # Optional. Without them the release PR is opened with GITHUB_TOKEN and CI
+    # does not run on it. Map explicitly; never `secrets: inherit`.
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

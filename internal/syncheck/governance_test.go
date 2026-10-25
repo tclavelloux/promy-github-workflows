@@ -149,6 +149,17 @@ func TestTemplatesPassRules(t *testing.T) {
 			t.Errorf("templates/go-vuln-fix-caller.yml as %s fails policy:\n%s", vfRel, joinMessages(rep.Violations))
 		}
 	})
+	t.Run("release-please.yml", func(t *testing.T) {
+		const rel = "templates/release-please.yml"
+		if rep := templateRoot(t, rel, rpRel); !rep.OK() {
+			t.Errorf("%s as %s fails the Go profile:\n%s", rel, rpRel, joinMessages(rep.Violations))
+		}
+		root := fixture(t, pyPassFixture)
+		writeFile(t, root, rpRel, string(govRead(t, rel)))
+		if rep := run(t, root); !rep.OK() {
+			t.Errorf("%s as %s fails the Python profile:\n%s", rel, rpRel, joinMessages(rep.Violations))
+		}
+	})
 	t.Run("dependabot.yml", func(t *testing.T) {
 		rep := templateRoot(t, "templates/dependabot.yml", depRel)
 		if !rep.OK() {
