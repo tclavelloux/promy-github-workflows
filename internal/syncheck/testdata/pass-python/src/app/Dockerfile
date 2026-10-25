@@ -5,7 +5,7 @@ WORKDIR /code/job
 
 # uv is pinned to .uv-version. The venv lives outside /code/job because compose
 # bind-mounts ./src/job over it.
-COPY --from=ghcr.io/astral-sh/uv:0.11.13 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.18 /uv /usr/local/bin/uv
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON_DOWNLOADS=never \
     UV_NO_CACHE=1 \

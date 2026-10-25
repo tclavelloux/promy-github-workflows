@@ -196,7 +196,7 @@ func TestPythonDrift(t *testing.T) {
 		{name: "github-actions dropped", edits: []edit{ed(depRel, "package-ecosystem: github-actions", "package-ecosystem: gitsubmodule")}, rules: []string{"dependabot"}, msg: `"github-actions"`},
 		{name: "dependabot.yml missing", do: rm(depRel), rules: []string{"dependabot"}, msg: "templates/python/dependabot.yml"},
 		// repo files
-		{name: "uv-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".uv-version", "0.11.12\n") }, rules: []string{"uv-version"}, msg: "want 0.11.13"},
+		{name: "uv-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".uv-version", "0.12.17\n") }, rules: []string{"uv-version"}, msg: "want 0.12.18"},
 		{name: "uv-version missing", do: rm(".uv-version"), rules: []string{"uv-version"}, msg: "file missing"},
 		{name: "ruff-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".ruff-version", "0.16.0\n") }, rules: []string{"ruff-version"}, msg: "want 0.17.0"},
 		{name: "ruff hook rev drift", edits: []edit{ed(pcRel, "rev: v0.17.0", "rev: v0.16.0")}, rules: []string{"ruff-version"}, msg: `rev "v0.16.0"; want v0.17.0`},

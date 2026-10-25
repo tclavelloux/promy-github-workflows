@@ -540,7 +540,7 @@ Shared contract:
 
 - `ci.yml`: jobs `lint`, `typecheck`, `vuln`, `test`, `gitleaks`, plus `docker` iff a project has a `Dockerfile`, each calling its `python-*/v1` workflow with no `permissions:`; every job's `projects` lists exactly the uv projects (`ci-projects`).
 - `dependabot.yml`: `github-actions`, `uv` for every project, `docker` for every project with a `Dockerfile` (ignoring `ghcr.io/astral-sh/uv`).
-- Pins: `.uv-version` = `0.11.13`, `.ruff-version` and the `ruff-pre-commit` rev = `0.17.0`; `.python-version` per project; no `poetry.lock`.
+- Pins: `.uv-version` = `0.12.18`, `.ruff-version` and the `ruff-pre-commit` rev = `0.17.0`; `.python-version` per project; no `poetry.lock`.
 - Every osv-scanner ignore has a reason and expires within 90 days; every tested project has `fail_under` in (0, 100].
 - Shared with Go: trigger, concurrency, permissions, draft skip, SHA pins, `pr-title.yml`, `release-please.yml`, the pre-commit and Makefile rules (`check-coverage` hook running `make check-coverage`).
 

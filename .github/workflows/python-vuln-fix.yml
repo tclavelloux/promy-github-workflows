@@ -28,10 +28,10 @@ name: Python Vulnerability Fix
 # advisories sooner locally.
 #
 # uv version: read from the caller's `.uv-version`, the same pin python-lint
-# enforces. A lock last written by a newer uv than that pin gets rewritten in the
-# newer uv's style (e.g. extra `marker = ...` entries) when a resolution runs:
-# measured at 226 lines on one 0.12.18-written lock and 528 on another with uv
-# 0.11.13, 0 with 0.12.18. The lock stays valid; Dependabot rewrites it back.
+# enforces. The fleet pin tracks the uv version Dependabot writes locks with, so
+# a fix run leaves the lock's style untouched. A lock last written by a newer uv
+# than the pin gets rewritten in the newer uv's style (e.g. extra `marker = ...`
+# entries) when a resolution runs; the lock stays valid, Dependabot rewrites it.
 #
 # CI on the PR: when the caller passes the optional APP_CLIENT_ID and
 # APP_PRIVATE_KEY secrets, the PR is opened with a GitHub App installation
@@ -124,7 +124,7 @@ jobs:
           version="$(head -n1 .uv-version | tr -d '[:space:]')"
           version="${version#v}"
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
-            echo "::error file=.uv-version::.uv-version must hold one plain version such as 0.11.13, found '${version}'."
+            echo "::error file=.uv-version::.uv-version must hold one plain version such as 0.12.18, found '${version}'."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"

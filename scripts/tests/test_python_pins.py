@@ -9,7 +9,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import python_pins as pp  # noqa: E402
 
-PIN = "0.11.13"
+PIN = "0.12.18"
 RUFF = "0.17.0"
 
 PRECOMMIT = f"""\
@@ -86,44 +86,44 @@ class UvPins(unittest.TestCase):
 
     def test_hook_rev_mismatch(self):
         f = good_tree()
-        f[".pre-commit-config.yaml"] = PRECOMMIT.replace(f"rev: {PIN}", "rev: 0.11.12")
+        f[".pre-commit-config.yaml"] = PRECOMMIT.replace(f"rev: {PIN}", "rev: 0.12.17")
         code, out = run(f, "uv-pins")
         self.assertEqual(code, 1)
         self.assertEqual(len(errors(out)), 1, out)
         self.assertIn("file=.pre-commit-config.yaml,line=3", out)
-        self.assertIn("rev is 0.11.12, expected 0.11.13", out)
+        self.assertIn("rev is 0.12.17, expected 0.12.18", out)
 
     def test_dockerfile_tag_mismatch_one_annotation_per_file(self):
         f = good_tree()
-        f["src/store/Dockerfile"] = dockerfile(uv="0.11.12")
+        f["src/store/Dockerfile"] = dockerfile(uv="0.12.17")
         f["src/leaflet/Dockerfile"] = dockerfile(uv="0.10.0")
         code, out = run(f, "uv-pins")
         self.assertEqual(code, 1)
         errs = errors(out)
         self.assertEqual(len(errs), 2, out)
-        self.assertTrue(any("file=src/store/Dockerfile,line=2" in e and "expected 0.11.13" in e for e in errs))
+        self.assertTrue(any("file=src/store/Dockerfile,line=2" in e and "expected 0.12.18" in e for e in errs))
         self.assertTrue(any("file=src/leaflet/Dockerfile" in e and "0.10.0" in e for e in errs))
 
     def test_pin_file_drift(self):
         f = good_tree()
-        f[".uv-version"] = "0.12.0\n"
+        f[".uv-version"] = "0.12.19\n"
         code, out = run(f, "uv-pins")
         self.assertEqual(code, 1)
-        # hook rev, 3 Dockerfiles, and the 3 floors >=0.11.13 still pass for 0.12.0
+        # hook rev, 3 Dockerfiles, and the 3 floors >=0.12.18 still pass for 0.12.19
         self.assertEqual(len(errors(out)), 4, out)
 
     def test_floor_not_satisfied(self):
         f = good_tree()
-        f["src/store/pyproject.toml"] = pyproject(floor=">=0.12.0")
+        f["src/store/pyproject.toml"] = pyproject(floor=">=0.12.19")
         code, out = run(f, "uv-pins")
         self.assertEqual(code, 1)
         self.assertEqual(len(errors(out)), 1, out)
         self.assertIn("file=src/store/pyproject.toml", out)
-        self.assertIn("not satisfied by .uv-version 0.11.13", out)
+        self.assertIn("not satisfied by .uv-version 0.12.18", out)
 
     def test_upper_bound_not_satisfied(self):
         f = good_tree()
-        f["src/store/pyproject.toml"] = pyproject(floor=">=0.11.0,<0.11.13")
+        f["src/store/pyproject.toml"] = pyproject(floor=">=0.12.0,<0.12.18")
         code, out = run(f, "uv-pins")
         self.assertEqual(code, 1, out)
 
@@ -371,8 +371,8 @@ class Usage(unittest.TestCase):
             self.assertEqual(code, 2, args)
 
     def test_satisfies(self):
-        self.assertEqual(pp.satisfies("0.11.13", ">=0.11.13"), (True, None))
-        self.assertEqual(pp.satisfies("0.11.13", ">=0.11.14"), (False, None))
+        self.assertEqual(pp.satisfies("0.12.18", ">=0.12.18"), (True, None))
+        self.assertEqual(pp.satisfies("0.12.18", ">=0.12.19"), (False, None))
         self.assertEqual(pp.satisfies("3.12", ">=3.12,<3.13"), (True, None))
         self.assertEqual(pp.satisfies("1.0", "==1.0.0"), (True, None))
         self.assertIsNotNone(pp.satisfies("1.0", "~=1.0")[1])
