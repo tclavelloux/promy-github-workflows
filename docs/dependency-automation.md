@@ -9,7 +9,7 @@
 
 ## Pieces
 
-Tags: `dependabot-automerge/v1(.0.0, .1.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.4.0` are cut (`dependabot-automerge/v1.1.0` adds the `ecosystems` and `exclude-dependencies` inputs; `dependabot-automerge/v1.2.0`, not yet cut, adds `promy-fleet-bot[bot]` vuln-fix PRs). `go-vuln-fix/v1.1.0` (App token, go patch bump) is cut with the move of `go-vuln-fix/v1`.
+Tags: `dependabot-automerge/v1(.0.0, .1.0, .2.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.6.0` are cut (`dependabot-automerge/v1.1.0` adds the `ecosystems` and `exclude-dependencies` inputs; `dependabot-automerge/v1.2.0` adds `promy-fleet-bot[bot]` vuln-fix PRs, and `/v1` points at it). Fleet callers need the two-bot `if:` from `hooks/v1.6.0`: see the rollout in [workflow-sync.md](workflow-sync.md). `go-vuln-fix/v1.1.0` (App token, go patch bump) is cut with the move of `go-vuln-fix/v1`.
 
 | Piece | File | Tag | Fixes |
 |---|---|---|---|

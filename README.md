@@ -139,7 +139,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `go-vuln.yml` | `go-vuln/v1` | New; own tag namespace, same as the other two. |
 | `go-docker.yml` | `go-docker/v1` | Own tag namespace, same as the others. Immutable `go-docker/v1.0.0` alongside. |
 | `pr-title.yml` | `pr-title/v1` | Own tag namespace, same as the others. Tag cut when this workflow lands on `main`. |
-| `dependabot-automerge.yml` | `dependabot-automerge/v1` | Own tag namespace, same as the others. Immutable `dependabot-automerge/v1.0.0` alongside. |
+| `dependabot-automerge.yml` | `dependabot-automerge/v1` | Own tag namespace, same as the others. Immutable `v1.0.0`, `v1.1.0` (`ecosystems`, `exclude-dependencies`), `v1.2.0` (`promy-fleet-bot` vuln-fix PRs) alongside. `workflow-sync` requires the two-bot caller `if:` from `hooks/v1.6.0`. |
 | `go-vuln-fix.yml` | `go-vuln-fix/v1` | Own tag namespace, same as the others. Immutable `go-vuln-fix/v1.1.0` alongside (adds the optional App secrets and `go-patch-bump`). |
 | `python-lint.yml` | `python-lint/v1` | New; own tag namespace. `RuffVersion` in `policy.go` ties to its `ruff-version` default. |
 | `python-typecheck.yml` | `python-typecheck/v1` | New; own tag namespace. |
@@ -148,7 +148,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `python-docker.yml` | `python-docker/v1` | New; own tag namespace. |
 | `python-vuln-fix.yml` | `python-vuln-fix/v1` | New; own tag namespace. Writes (App token, PR, issue), so it is not one of the five read-only Python workflows. `OSVScannerVersion` in `policy.go` and `python-vuln.yml` tie to its `osv-scanner-*` defaults. `workflow-sync` checks its caller from `hooks/v1.5.0`. |
 | `release-please.yml` | `release-please/v1` | New; own tag namespace. `workflow-sync` checks its caller from `hooks/v1.6.0`. |
-| `.pre-commit-hooks.yaml` | `hooks/v1.4.0` (latest: adds `py-vuln` and the Python profile of `workflow-sync`; `hooks/v1.3.0` accepts the go-vuln-fix App secrets; `hooks/v1.2.0` added `workflow-sync`; `hooks/v1.1.0` added `go-vuln`) | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
+| `.pre-commit-hooks.yaml` | `hooks/v1.6.0` (latest: `workflow-sync` requires the reusable release-please caller and the two-bot automerge `if:`; `hooks/v1.5.x` checks the python-vuln-fix caller; `hooks/v1.4.0` adds `py-vuln` and the Python profile of `workflow-sync`; `hooks/v1.3.0` accepts the go-vuln-fix App secrets; `hooks/v1.2.0` added `workflow-sync`; `hooks/v1.1.0` added `go-vuln`) | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
 
