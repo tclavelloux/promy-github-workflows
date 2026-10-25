@@ -253,29 +253,27 @@ Python caller (promy-market-catalog, step C10), one PR:
 - Before wiring, `go run github.com/tclavelloux/promy-github-workflows/cmd/workflow-sync@<sha> --root .` lists the drift. On the catalog at `5613540` it reports exactly the two wiring findings above (`ci-lint-sync`, `precommit-governance-repo`).
 - Go callers need nothing: every Go repo gives byte-identical output at `hooks/v1.3.0` and `hooks/v1.4.0`.
 
-## Rollout of hooks/v1.6.0 (release-please)
+## Rollout of hooks/v1.6.0 (release-please + fleet-bot automerge)
 
-Governance repo, once:
+`hooks/v1.6.0` carries two rule changes: the `release-please` rule (#46) and the two-bot `ci-automerge` `if:` (#47). One rollout covers both.
 
-1. Merge the PR adding `release-please.yml` and its policy.
-2. Cut signed tags on the merge commit:
-   - `release-please/v1.0.0` (immutable) and `release-please/v1` (moving major)
-   - `hooks/v1.6.0` (new, immutable; never move an existing `hooks/v*`)
-   ```bash
-   git tag -s release-please/v1.0.0 -m release-please/v1.0.0 <sha>
-   git tag -s release-please/v1 -m release-please/v1 <sha>
-   git tag -s hooks/v1.6.0 -m hooks/v1.6.0 <sha>
-   git push origin release-please/v1.0.0 release-please/v1 hooks/v1.6.0
-   ```
+Governance repo, done 2026-10-25 (signed):
 
-Per repo, ONE PR that does both:
+- `release-please/v1.0.0` and `release-please/v1` on `0b60556`
+- `dependabot-automerge/v1.2.0` on `64e5ea4`; `dependabot-automerge/v1` moved from `v1.1.0` to it
+- `hooks/v1.6.0` on `64e5ea4` (new, immutable; never move an existing `hooks/v*`)
+
+Per repo, ONE PR with all three changes:
 
 - Replace `.github/workflows/release-please.yml` with `templates/release-please.yml`.
+- In `ci.yml`, set the `automerge` job `if:` to `github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'` (see `templates/ci-automerge-job.yml`).
 - Bump the governance `rev:` in `.pre-commit-config.yaml` to `hooks/v1.6.0`.
 
-They ship together because each policy rejects the other's file:
+They ship together because each policy rejects the other's files:
 
-- `hooks/v1.5.1` and older fail the new caller with "no step uses googleapis/release-please-action".
-- `hooks/v1.6.0` fails the old local copy.
+- `hooks/v1.5.1` and older fail the new release-please caller with "no step uses googleapis/release-please-action".
+- `hooks/v1.6.0` fails the old local release-please copy and the single-bot automerge `if:`.
+
+Until a repo's `ci.yml` changes, `dependabot-automerge/v1` already runs the new gate for Dependabot PRs, but the old caller `if:` skips `promy-fleet-bot` PRs before the reusable workflow starts.
 
 promy-frontend: copy `templates/release-please.yml` by hand. It has no `workflow-sync` profile, and it needs the `APP_CLIENT_ID` and `APP_PRIVATE_KEY` secrets first.
