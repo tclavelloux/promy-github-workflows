@@ -1,0 +1,122 @@
+name: Release Please
+
+# Runs googleapis/release-please-action on the caller's repo: opens or updates
+# the release PR from the Conventional Commits on `main`, and cuts the tag and
+# GitHub release when that PR merges. Call it from a `push: branches: [main]`
+# caller; see templates/release-please.yml.
+#
+# CI on the release PR: GitHub starts no `pull_request` workflows for a PR
+# created with GITHUB_TOKEN, so a release PR opened that way shows no checks.
+# When the caller passes the optional APP_CLIENT_ID and APP_PRIVATE_KEY secrets,
+# the PR is opened with a GitHub App installation token and CI runs on it.
+# Without them the workflow falls back to GITHUB_TOKEN and warns; a human must
+# close and reopen the PR (fires `reopened`) or push a commit to get checks.
+#
+# Releases are never auto-merged: cutting one stays a human decision.
+#
+# The caller keeps its own release-please-config.json and manifest; only their
+# paths are inputs. Tags and releases created with the App token DO trigger
+# `push: tags` and `release` workflows in the caller, unlike GITHUB_TOKEN.
+#
+# No checkout: release-please works through the GitHub API.
+
+on:
+  workflow_call:
+    inputs:
+      config-file:
+        description: Path to the release-please config in the caller repo.
+        required: false
+        type: string
+        default: release-please-config.json
+      manifest-file:
+        description: Path to the release-please manifest in the caller repo.
+        required: false
+        type: string
+        default: .release-please-manifest.json
+    secrets:
+      APP_CLIENT_ID:
+        description: Client ID of a GitHub App installed on the repository with contents and pull-requests write. With APP_PRIVATE_KEY, the release PR is opened by the App so CI runs on it.
+        required: false
+      APP_PRIVATE_KEY:
+        description: Private key of that GitHub App.
+        required: false
+    outputs:
+      releases_created:
+        description: true when at least one release was created.
+        value: ${{ jobs.release-please.outputs.releases_created }}
+      release_created:
+        description: true when a release was created for the root path.
+        value: ${{ jobs.release-please.outputs.release_created }}
+      tag_name:
+        description: Tag of the root-path release.
+        value: ${{ jobs.release-please.outputs.tag_name }}
+      version:
+        description: Version of the root-path release.
+        value: ${{ jobs.release-please.outputs.version }}
+      sha:
+        description: Commit SHA the root-path release was cut from.
+        value: ${{ jobs.release-please.outputs.sha }}
+      prs_created:
+        description: true when at least one release PR was created or updated.
+        value: ${{ jobs.release-please.outputs.prs_created }}
+      pr:
+        description: JSON of the release PR (head branch, number, title, body).
+        value: ${{ jobs.release-please.outputs.pr }}
+      paths_released:
+        description: JSON array of the paths released.
+        value: ${{ jobs.release-please.outputs.paths_released }}
+
+# The caller's job must grant exactly these: a called workflow can only narrow
+# the caller's permissions, never widen them.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Concurrency groups are repo-scoped. Two runs racing on the same release
+    # branch must not interleave. A queued run supersedes an older queued one,
+    # which is safe: each run rescans from the last release.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    env:
+      # Secrets cannot be read in a step `if:`; expose whether both are set.
+      HAS_APP: ${{ secrets.APP_CLIENT_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
+      paths_released: ${{ steps.release.outputs.paths_released }}
+    steps:
+      # A failed mint fails the job: a broken key must be visible, not silently
+      # downgraded to a release PR without CI.
+      - name: Create GitHub App token
+        id: app-token
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Warn that CI will not run on the release PR
+        if: env.HAS_APP != 'true'
+        run: echo "::warning title=release-please::APP_CLIENT_ID and APP_PRIVATE_KEY are not set, so the release PR is opened with GITHUB_TOKEN and CI will not run on it. Map both secrets in the caller."
+
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          # App token when minted (CI runs on the PR), GITHUB_TOKEN otherwise.
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          config-file: ${{ inputs.config-file }}
+          manifest-file: ${{ inputs.manifest-file }}

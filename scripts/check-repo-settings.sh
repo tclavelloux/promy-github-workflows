@@ -47,11 +47,13 @@ check() {
 
 for repo in "${REPOS[@]}"; do
   # Read default is why caller jobs need explicit permissions blocks.
-  # can_approve_pull_request_reviews gates "Actions may create PRs":
-  # dependabot-automerge and go-vuln-fix need it.
+  # can_approve_pull_request_reviews is "Allow GitHub Actions to create and
+  # approve pull requests"; it gates GITHUB_TOKEN only. The App opens every fleet
+  # bot PR (vuln-fix, release-please) and dependabot-automerge only runs
+  # `gh pr merge`, which this setting does not gate, so keep it off.
   perms="repos/$repo/actions/permissions/workflow"
   check "$repo" default_workflow_permissions read "$perms" .default_workflow_permissions
-  check "$repo" can_approve_pull_request_reviews true "$perms" .can_approve_pull_request_reviews
+  check "$repo" can_approve_pull_request_reviews false "$perms" .can_approve_pull_request_reviews
 
   # Squash-only: the PR title is the commit release-please parses.
   check "$repo" allow_squash_merge true "repos/$repo" .allow_squash_merge

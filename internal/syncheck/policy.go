@@ -43,6 +43,7 @@ var WorkflowMajors = map[string]int{
 	"python-test":          1,
 	"python-docker":        1,
 	"python-vuln-fix":      1,
+	"release-please":       1,
 }
 
 var CommitTypes = []string{"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"}
@@ -81,12 +82,13 @@ var (
 type perms map[string]string
 
 var (
-	PermsRead         = perms{"contents": "read"}
-	PermsCoverage     = perms{"contents": "read", "pull-requests": "write"}
-	PermsGitleaks     = perms{"contents": "read", "pull-requests": "read"}
-	PermsPRTitleJob   = perms{"contents": "read", "pull-requests": "read"}
-	PermsVulnFixJob   = perms{"contents": "write", "pull-requests": "write", "issues": "write"}
-	PermsAutomergeJob = perms{"contents": "write", "pull-requests": "write", "checks": "read", "actions": "read", "statuses": "read"}
+	PermsRead             = perms{"contents": "read"}
+	PermsCoverage         = perms{"contents": "read", "pull-requests": "write"}
+	PermsGitleaks         = perms{"contents": "read", "pull-requests": "read"}
+	PermsPRTitleJob       = perms{"contents": "read", "pull-requests": "read"}
+	PermsVulnFixJob       = perms{"contents": "write", "pull-requests": "write", "issues": "write"}
+	PermsReleasePleaseJob = perms{"contents": "write", "pull-requests": "write"}
+	PermsAutomergeJob     = perms{"contents": "write", "pull-requests": "write", "checks": "read", "actions": "read", "statuses": "read"}
 )
 
 // govRef is the exact `uses:` value for a governance reusable workflow.

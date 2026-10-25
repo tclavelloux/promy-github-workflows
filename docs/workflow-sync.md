@@ -72,7 +72,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | Rule | File | Invariant | Why |
 |---|---|---|---|
 | `pr-title` | `pr-title.yml` | Exists. `on.pull_request.types` = {opened, edited, reopened, synchronize}. Top-level `{contents: read}`. One job `pr-title`, permissions `{contents: read, pull-requests: read}`, uses `pr-title/v1` | PR title is the squash commit release-please parses; without `edited` a fixed title never re-checks |
-| `release-please` | `release-please.yml` | Exists. `on` is exactly `push: {branches: [main]}`. A step uses `googleapis/release-please-action` | Releases cut from `main` only |
+| `release-please` | `release-please.yml` | Exists. `on` is exactly `push: {branches: [main]}`. Top-level `{contents: read}`. One job `release-please`, permissions exactly `{contents: write, pull-requests: write}`, uses `release-please/v1` (a local copy running `googleapis/release-please-action` fails). `secrets:` on the job is optional; when present it is exactly `{APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}, APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}}` (no `secrets: inherit`, no other key or value) | Releases cut from `main` only; one release workflow for the fleet; only the two App credentials cross into the reusable workflow, so the release PR gets CI |
 | `vuln-fix` | `vuln-fix.yml` (optional) | `on` = `schedule` plus optional `workflow_dispatch`. Top-level `{contents: read}`. Concurrency `{group: <workflow>, cancel-in-progress: false}`. One job `fix`, permissions exactly `{contents: write, pull-requests: write, issues: write}`, uses `<workflow>/v1`. `<workflow>` is `go-vuln-fix` for Go and `python-vuln-fix` for Python. Python also: `with.projects` is a JSON-array string listing exactly the uv projects (same parsing as `ci-projects`). `secrets:` on `fix` is optional; when present it is exactly `{APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}, APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}}` (no `secrets: inherit`, no other key or value) | A running fix is never cancelled mid-PR; no broader token; only the two App credentials cross into the reusable workflow; a Python project left out of `projects` is never patched |
 | `dependabot` | `.github/dependabot.yml` | Go: exists with `gomod` and `github-actions` entries at directory `/`. Python: `github-actions` at `/`; `uv` entries whose `directory`/`directories` (globs allowed) cover every uv project; `docker` entries covering every uv project with a `Dockerfile`, each `docker` entry ignoring `ghcr.io/astral-sh/uv` unconditionally | The bump surface. Python: a Dependabot bump of the Dockerfile uv tag alone turns python-lint's uv-pin drift check red |
 
@@ -164,7 +164,7 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
 - Cannot stop a caller dropping `with: workflow-sync: true`: `ci-lint-sync` catches it only when the local hook runs.
 - Cannot read repo settings; `GITHUB_TOKEN` has no access. `scripts/check-repo-settings.sh` does, run by hand with the keyring token.
 - `scripts/check-repo-settings.sh` checks per repo:
-  - Actions default permissions `read`; Actions may create PRs (`can_approve_pull_request_reviews`), needed by `dependabot-automerge` and `go-vuln-fix`.
+  - Actions default permissions `read`; Actions may NOT create or approve PRs (`can_approve_pull_request_reviews` is `false`). The App opens every fleet bot PR and `dependabot-automerge` only merges, which the setting does not gate.
   - Squash merge on, merge commit off, rebase off. The PR title is the commit release-please parses.
   - Vulnerability alerts enabled; automated security fixes enabled.
 - Output: `ok|FAIL <repo> <check> (got <value>)`. Exit 1 on any FAIL, 2 when `gh` errors. `GH=<path>` swaps the binary for tests.
@@ -178,7 +178,7 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
    - golangci-lint version equals the `go-lint.yml` default.
    - Commit types equal the `pr-title.yml` `types` default.
    - Every `workflow_call` workflow has a policy major, and the reverse.
-   - `templates/` (automerge job, vuln-fix callers for both profiles, `Makefile.vuln.mk`, `pre-commit-go-vuln.yaml`, `dependabot.yml`) pass the rules.
+   - `templates/` (automerge job, vuln-fix callers for both profiles, `release-please.yml` over both the Go and Python fixtures, `Makefile.vuln.mk`, `pre-commit-go-vuln.yaml`, `dependabot.yml`) pass the rules.
    - `templates/python/` (ci.yml, dependabot.yml, pre-commit-config.yaml, Makefile) pass the Python profile over `testdata/pass-python`; its uv-pre-commit rev equals `UVVersion`, its ruff rev equals `RuffVersion`.
    - `.osv-scanner-version` (read by the `py-vuln` hook) equals `OSVScannerVersion` (the `python-vuln.yml` default).
 4. Merge, then cut a new immutable `hooks/vX.Y.Z`. Never move an existing `hooks/v*` tag.
@@ -252,3 +252,30 @@ Python caller (promy-market-catalog, step C10), one PR:
 - `ci.yml`: `with: {workflow-sync: true}` on the `lint` job.
 - Before wiring, `go run github.com/tclavelloux/promy-github-workflows/cmd/workflow-sync@<sha> --root .` lists the drift. On the catalog at `5613540` it reports exactly the two wiring findings above (`ci-lint-sync`, `precommit-governance-repo`).
 - Go callers need nothing: every Go repo gives byte-identical output at `hooks/v1.3.0` and `hooks/v1.4.0`.
+
+## Rollout of hooks/v1.6.0 (release-please)
+
+Governance repo, once:
+
+1. Merge the PR adding `release-please.yml` and its policy.
+2. Cut signed tags on the merge commit:
+   - `release-please/v1.0.0` (immutable) and `release-please/v1` (moving major)
+   - `hooks/v1.6.0` (new, immutable; never move an existing `hooks/v*`)
+   ```bash
+   git tag -s release-please/v1.0.0 -m release-please/v1.0.0 <sha>
+   git tag -s release-please/v1 -m release-please/v1 <sha>
+   git tag -s hooks/v1.6.0 -m hooks/v1.6.0 <sha>
+   git push origin release-please/v1.0.0 release-please/v1 hooks/v1.6.0
+   ```
+
+Per repo, ONE PR that does both:
+
+- Replace `.github/workflows/release-please.yml` with `templates/release-please.yml`.
+- Bump the governance `rev:` in `.pre-commit-config.yaml` to `hooks/v1.6.0`.
+
+They ship together because each policy rejects the other's file:
+
+- `hooks/v1.5.1` and older fail the new caller with "no step uses googleapis/release-please-action".
+- `hooks/v1.6.0` fails the old local copy.
+
+promy-frontend: copy `templates/release-please.yml` by hand. It has no `workflow-sync` profile, and it needs the `APP_CLIENT_ID` and `APP_PRIVATE_KEY` secrets first.

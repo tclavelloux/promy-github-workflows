@@ -62,7 +62,7 @@ func (c *checker) checkPRTitle() {
 func (c *checker) checkReleasePlease() {
 	p := c.loadYAML(releaseFile)
 	if !p.exists {
-		c.add(releaseFile, 0, ruleReleasePlease, "file missing; add a release-please workflow running googleapis/release-please-action on push to main")
+		c.add(releaseFile, 0, ruleReleasePlease, "file missing; copy templates/release-please.yml, which calls %s", govRef("release-please"))
 		return
 	}
 	root := p.root
@@ -75,21 +75,38 @@ func (c *checker) checkReleasePlease() {
 	if names := onNames(on); len(names) != 1 || names[0] != "push" || len(keys(push)) != 1 || !ok || !sameSet(br, setOf("main")) {
 		c.add(releaseFile, line(k, 1), ruleReleasePlease, "on = %s; want exactly `push: {branches: [main]}`", describeOn(on))
 	}
-	found := false
-	if _, jobs := get(root, "jobs"); isMap(jobs) {
-		for i := 1; i < len(jobs.Content); i += 2 {
-			if steps := val(deref(jobs.Content[i]), "steps"); isSeq(steps) {
-				for _, s := range steps.Content {
-					if strings.HasPrefix(strings.ToLower(scalar(val(deref(s), "uses"))), "googleapis/release-please-action@") {
-						found = true
-					}
-				}
-			}
+	pk, pn := get(root, "permissions")
+	c.wantPerms(releaseFile, line(pk, 1), ruleReleasePlease, "top-level", pn, PermsRead)
+
+	job := c.singleJob(releaseFile, ruleReleasePlease, root, "release-please")
+	if job == nil {
+		return
+	}
+	jk, jn := get(job, "permissions")
+	c.wantPerms(releaseFile, line(jk, line(job, 1)), ruleReleasePlease, `job "release-please"`, jn, PermsReleasePleaseJob)
+	if u := val(job, "uses"); u == nil || u.Value != govRef("release-please") {
+		why := ""
+		if runsReleasePleaseLocally(job) {
+			why = " (it runs release-please locally; call the governance workflow instead)"
+		}
+		c.add(releaseFile, line(u, line(job, 1)), ruleReleasePlease, `job "release-please" uses %q; want %s%s`, scalar(u), govRef("release-please"), why)
+	}
+	c.checkAppSecrets(releaseFile, ruleReleasePlease, "release-please", job)
+}
+
+// runsReleasePleaseLocally reports whether a job has a step running
+// googleapis/release-please-action, the pre-reusable-workflow shape.
+func runsReleasePleaseLocally(job *yaml.Node) bool {
+	steps := val(job, "steps")
+	if !isSeq(steps) {
+		return false
+	}
+	for _, s := range steps.Content {
+		if strings.HasPrefix(strings.ToLower(scalar(val(deref(s), "uses"))), "googleapis/release-please-action@") {
+			return true
 		}
 	}
-	if !found {
-		c.add(releaseFile, line(val(root, "jobs"), 1), ruleReleasePlease, "no step uses googleapis/release-please-action")
-	}
+	return false
 }
 
 func describeOn(on *yaml.Node) string {
@@ -137,7 +154,7 @@ func (c *checker) checkVulnFix() {
 	if c.prof == pythonProfile {
 		c.checkVulnFixProjects(job)
 	}
-	c.checkVulnFixSecrets(job)
+	c.checkAppSecrets(vulnFixFile, ruleVulnFix, "fix", job)
 }
 
 // checkVulnFixProjects requires the Python caller's with.projects to list every
@@ -168,32 +185,32 @@ func (c *checker) checkVulnFixProjects(job *yaml.Node) {
 	}
 }
 
-// vulnFixSecrets are the only secrets job "fix" may pass: the GitHub App
-// credentials that let the fix PR trigger CI. The block is optional.
-var vulnFixSecrets = []string{"APP_CLIENT_ID", "APP_PRIVATE_KEY"}
+// appSecrets are the only secrets a bot-PR caller job may pass: the GitHub App
+// credentials that let its PR trigger CI. The block is optional.
+var appSecrets = []string{"APP_CLIENT_ID", "APP_PRIVATE_KEY"}
 
-func (c *checker) checkVulnFixSecrets(job *yaml.Node) {
+func (c *checker) checkAppSecrets(file, rule, jobName string, job *yaml.Node) {
 	sk, sn := get(job, "secrets")
 	if sk == nil {
 		return
 	}
 	want := `{APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}, APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}}`
 	if !isMap(sn) {
-		c.add(vulnFixFile, line(sk, 1), ruleVulnFix, `job "fix" secrets = %q; want an explicit mapping %s (least privilege: never `+"`secrets: inherit`"+`)`, scalar(sn), want)
+		c.add(file, line(sk, 1), rule, `job %q secrets = %q; want an explicit mapping %s (least privilege: never `+"`secrets: inherit`"+`)`, jobName, scalar(sn), want)
 		return
 	}
 	got := map[string]string{}
 	for _, k := range keys(sn) {
 		got[k] = normExpr(scalar(val(sn, k)))
 	}
-	ok := len(got) == len(vulnFixSecrets)
-	for _, name := range vulnFixSecrets {
+	ok := len(got) == len(appSecrets)
+	for _, name := range appSecrets {
 		if got[name] != "secrets."+name {
 			ok = false
 		}
 	}
 	if !ok {
-		c.add(vulnFixFile, line(sk, 1), ruleVulnFix, `job "fix" secrets = %v; want exactly %s (least privilege)`, got, want)
+		c.add(file, line(sk, 1), rule, `job %q secrets = %v; want exactly %s (least privilege)`, jobName, got, want)
 	}
 }
 
