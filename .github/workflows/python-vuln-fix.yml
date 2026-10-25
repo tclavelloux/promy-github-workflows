@@ -40,9 +40,10 @@ name: Python Vulnerability Fix
 # close and reopen it (fires `reopened`) or push a commit before merging, and
 # the PR body says so.
 #
-# This workflow never merges and never enables auto-merge. The fix PR is opened
-# by this workflow, not by Dependabot, so a caller's Dependabot automerge job
-# never picks it up: a human merges it.
+# This workflow never merges and never enables auto-merge. A caller's
+# dependabot-automerge job (v1.2.0+) merges the App-opened PR when its diff is
+# patch-level only and CI is green; otherwise a human merges it. A PR opened
+# with GITHUB_TOKEN runs no CI and is never auto-merged.
 #
 # The fix logic is inlined below, not read from scripts/python_vuln_fix.py: a
 # reusable workflow has no documented context exposing its own ref, so it cannot

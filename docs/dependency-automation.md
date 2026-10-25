@@ -9,7 +9,7 @@
 
 ## Pieces
 
-Tags: `dependabot-automerge/v1(.0.0, .1.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.4.0` are cut (`dependabot-automerge/v1.1.0` adds the `ecosystems` and `exclude-dependencies` inputs). `go-vuln-fix/v1.1.0` (App token, go patch bump) is cut with the move of `go-vuln-fix/v1`.
+Tags: `dependabot-automerge/v1(.0.0, .1.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.4.0` are cut (`dependabot-automerge/v1.1.0` adds the `ecosystems` and `exclude-dependencies` inputs; `dependabot-automerge/v1.2.0`, not yet cut, adds `promy-fleet-bot[bot]` vuln-fix PRs). `go-vuln-fix/v1.1.0` (App token, go patch bump) is cut with the move of `go-vuln-fix/v1`.
 
 | Piece | File | Tag | Fixes |
 |---|---|---|---|
@@ -37,7 +37,15 @@ Tags: `dependabot-automerge/v1(.0.0, .1.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.4
   - Optional secrets `APP_CLIENT_ID` + `APP_PRIVATE_KEY`; without them the run falls back to `GITHUB_TOKEN` and the PR body carries the "CI has not run" notice. A failed mint fails the run so a broken key is visible.
   - `client-id` replaces the deprecated `app-id` input.
   - Callers map the secrets explicitly; `workflow-sync` rejects `secrets: inherit`.
-  - Automerge never touches these PRs: it requires `dependabot[bot]` as author.
+  - Automerge merges these PRs when authored by `promy-fleet-bot[bot]` (`dependabot-automerge/v1.2.0`): see "Fleet-bot automerge" below.
+- Fleet-bot automerge (`dependabot-automerge/v1.2.0`):
+  - Why: green vuln-fix PRs sat unmerged for days (promy-user #109 `go` 1.26.9 -> 1.26.10, same advisory open in six repos).
+  - One allowlist: `dependabot[bot]`, `promy-fleet-bot[bot]`. It lives in the caller's `if:` (`AutomergeIf` in `policy.go`, enforced by `ci-automerge`), mirrored in the reusable job's `if:`. The commit-author check compares every commit with the PR opener, so a human commit on either bot's branch refuses.
+  - Each bot is tied to its branches: `dependabot/*`; `fix/vuln-*` and `fix/py-vuln-*` for the fleet bot. A `GITHUB_TOKEN` PR (`github-actions[bot]`) never matches.
+  - The fleet-bot decision reads the diff (merge base vs head), not the title or body, with fetch-metadata skipped: only modified `go.mod` / `go.sum` / `uv.lock`; same set of requirements/packages; versions move within the same major.minor and never down; no pre-release or pseudo-version; no other changed line (`replace`, `exclude`, `toolchain`); at least one bump. Branch and ecosystem must agree (`fix/vuln-*` = `go_modules`, `fix/py-vuln-*` = `uv`), then `ecosystems` and `exclude-dependencies` apply.
+  - Consequence: a `python-vuln-fix` PR whose resolver also moved another package by a minor is refused (notice, job success) and waits for a human.
+  - Check runs, commit statuses and `--match-head-commit` are unchanged (shared "Verify checks" / "Merge" steps).
+  - Caller change: the job `if:` must admit `promy-fleet-bot[bot]`; `workflow-sync` rule `ci-automerge` enforces it fleet-wide. Repos without an automerge job get nothing; add it from `templates/ci-automerge-job.yml`.
 - Go patch bump:
   - A called stdlib advisory fixed in a newer patch of the `go` directive's minor bumps the directive in the fix PR. Minor bumps stay human.
   - Fleet Dockerfiles use minor tags and `go-docker.yml` compares minors only, so no Dockerfile edit is needed.
@@ -49,7 +57,7 @@ Tags: `dependabot-automerge/v1(.0.0, .1.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.4
   - Dependabot overlap: keep the `uv-security` groups. They fix GHSA-backed advisories faster; this workflow fills the OSV-only gap. Branch namespaces differ (`dependabot/uv/...` vs `fix/py-vuln-*`), and a run that finds nothing to fix closes a bot-opened `fix/py-vuln-*` PR, so a bump Dependabot landed first leaves no stale PR.
   - CalVer: the first release segment rising is a major, except when both sides are >= 1000 (certifi `2024.2.2` -> `2026.10.19`, tzdata). Without it every certifi advisory would need a human.
   - Cascades: uv may move other packages when it resolves a bump. A cascade into an excluded or major-bumped package restores the lock and goes to the issue; other moves are kept and listed in the PR.
-  - Never auto-merged: the PR author is not `dependabot[bot]`, which every caller's automerge job requires, and the workflow itself has no merge step. `exclude-dependencies` should mirror the caller's automerge exclusions.
+  - The workflow has no merge step; a caller's automerge job merges the App-opened PR under the rules in "Fleet-bot automerge" (patch-level lock diff only). `exclude-dependencies` should mirror the caller's automerge exclusions.
   - Branches `fix/py-vuln-<hash>` are separate from Go's `fix/vuln-<hash>`: same dedupe, supersede and rejected-is-permanent rules.
 - Fix PR commit uses GraphQL `createCommitOnBranch`: GitHub signs it and no credentials touch disk.
 - Hook warns unless the pushed range touches `go.mod`/`go.sum`: an advisory published today must not block unrelated pushes, but a dependency edit is where the fix belongs. Manual runs always block.

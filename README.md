@@ -264,7 +264,7 @@ Requires only `pull-requests: read` — it reads the title off the event payload
 
 ## `dependabot-automerge.yml`
 
-Squash-merges a Dependabot PR (Go modules by default; `uv` and others opt-in) once every check on its head commit is green. Tag `dependabot-automerge/v1`. Rollout and limits: [docs/dependency-automation.md](docs/dependency-automation.md).
+Squash-merges a Dependabot or `promy-fleet-bot` vuln-fix PR (Go modules by default; `uv` and others opt-in) once every check on its head commit is green. Tag `dependabot-automerge/v1`. Rollout and limits: [docs/dependency-automation.md](docs/dependency-automation.md).
 
 Call it as the **last job of the caller's own `ci.yml`** (`on: pull_request`), with `needs:` listing every other job:
 
@@ -273,7 +273,7 @@ Call it as the **last job of the caller's own `ci.yml`** (`on: pull_request`), w
   # the backstop, not the primary gate.
   automerge:
     needs: [lint, vuln]
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    if: github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'
     permissions:
       contents: write
       pull-requests: write
@@ -312,7 +312,8 @@ Merges only when all of these hold:
 
 - Ecosystem is in `ecosystems`; update type is patch or minor (`dependabot/fetch-metadata`, SHA-pinned).
 - No dependency name matches `exclude-dependencies`.
-- Every commit on the PR is authored by `dependabot[bot]`, not only the first one fetch-metadata checks.
+- Every commit on the PR is authored by the PR's own bot (`dependabot[bot]` or `promy-fleet-bot[bot]`), not only the first one fetch-metadata checks.
+- `promy-fleet-bot[bot]` PRs (opened by `go-vuln-fix` / `python-vuln-fix` with the App token) are accepted only when the head branch is `fix/vuln-*` (Go) or `fix/py-vuln-*` (uv), every changed file is `go.mod`, `go.sum` or `uv.lock` (modified, not added or renamed), and the diff, read from the merge base and the head rather than the title or body, holds only patch-level bumps within the same minor (`go` directive included). An added or removed requirement, a changed `replace`/`exclude`/`toolchain` line, a pre-release or pseudo-version, or a downgrade refuses. `ecosystems` (`go_modules` for `fix/vuln-*`, `uv` for `fix/py-vuln-*`) and `exclude-dependencies` apply as for Dependabot; `merge-update-types` does not. A resolver side effect that moves another package by a minor (listed by `python-vuln-fix` under "Also moved") therefore goes to a human.
 - Every other check run on the head SHA is `completed` with `success`, `neutral` or `skipped`; no legacy commit status is `failure`, `error` or `pending`.
 - The head SHA is unchanged at merge time (`gh pr merge --squash --match-head-commit`).
 
@@ -463,7 +464,7 @@ Behaviour:
 - Dedupe: branch `fix/py-vuln-<12 hex of sha256 over the sorted project/ID pairs>`. An open PR on that branch skips the run. A **closed-unmerged** PR on that branch means rejected and is never retried.
 - A new PR closes older open `fix/py-vuln-*` PRs by `github-actions[bot]` or the App as superseded. A run that finds nothing to fix (Dependabot or a human landed it first) closes open `fix/py-vuln-*` PRs opened by a bot as stale, only when the scan completed and nothing aborted.
 - The commit goes through GraphQL `createCommitOnBranch` (GitHub-signed, no credentials on disk), one commit with every changed lock.
-- Never merges, never enables auto-merge. A caller's Dependabot automerge job requires `dependabot[bot]`, so a human merges the fix PR.
+- Never merges, never enables auto-merge itself. A caller's automerge job (`dependabot-automerge/v1.2.0`+) merges the App-opened fix PR once the diff is verified as patch-level and CI is green; a PR opened with `GITHUB_TOKEN` runs no CI and never reaches it.
 - uv version: read from the caller's `.uv-version` (same validation as `python-lint.yml`). A lock last written by a newer uv gets that uv's lock style when a resolution runs: keep the fleet pin at the version Dependabot uses.
 - With `APP_CLIENT_ID` and `APP_PRIVATE_KEY`, the PR and commit are authored by the App, so **CI runs on the PR**. Without them the PR is opened with `GITHUB_TOKEN`, **CI does not run on it** and the PR body says so. Close and reopen the PR before merging. A failed token mint fails the run. The issue always uses `GITHUB_TOKEN`.
 - The fix logic is inlined in the workflow; `scripts/python_vuln_fix.py` is its locally testable twin, and the Go tests keep the two blocks byte-identical. Exit codes: 0 completed, 2 usage or scanner error, 4 uv error that is not a refusal.
