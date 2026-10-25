@@ -1,12 +1,19 @@
 name: Dependabot Automerge
 
-# Squash-merges a Dependabot PR once every check on its head commit is green.
-# Patch/minor only; majors, GitHub Actions bumps, ecosystems outside `ecosystems`,
-# PRs touching a dependency matched by `exclude-dependencies`, and anything not
-# authored solely by dependabot[bot] are left for a human.
+# Squash-merges a PR from an allowlisted bot once every check on its head commit
+# is green. Allowlist (the job `if:` below, mirrored by the caller's `if:`):
+#   dependabot[bot]       branch dependabot/*; patch/minor per fetch-metadata.
+#   promy-fleet-bot[bot]  branches fix/vuln-* and fix/py-vuln-* (go-vuln-fix,
+#                         python-vuln-fix); patch-level bumps within the same
+#                         minor, verified from the diff (go.mod, go.sum, uv.lock
+#                         only), not from the title or body.
+# Majors, GitHub Actions bumps, ecosystems outside `ecosystems`, PRs touching a
+# dependency matched by `exclude-dependencies`, and any PR with a commit not
+# authored by the PR's own bot are left for a human.
 #
 # Inputs (all optional; defaults keep the Go callers unchanged):
-#   merge-update-types   space-separated fetch-metadata update-type allowlist.
+#   merge-update-types   space-separated fetch-metadata update-type allowlist
+#                        (Dependabot PRs only; fleet-bot PRs are always patch-only).
 #   ecosystems           comma-separated Dependabot package-ecosystem allowlist
 #                        (go_modules, uv, pip, docker, ...). Default go_modules.
 #                        github_actions is refused even if listed.
@@ -24,6 +31,8 @@ name: Dependabot Automerge
 #     (zizmor dangerous-triggers); not needed here.
 #   - workflow_run: also dangerous-triggers; fetch-metadata reads only
 #     pull_request payloads and would report "not from Dependabot".
+# A fleet-bot PR reaches this job only because the App token opened it (a
+# GITHUB_TOKEN PR starts no workflows).
 #   - check_suite: never fires for suites created by GitHub Actions.
 #
 # GITHUB_TOKEN consequence: the squash commit is pushed by GITHUB_TOKEN, so it
@@ -73,18 +82,24 @@ jobs:
   automerge:
     runs-on: ubuntu-latest
     timeout-minutes: 6
-    # Same-repo Dependabot branches only. A fork PR can spoof neither the user
-    # login nor a head repo equal to this one.
+    # Same-repo bot branches only. A fork PR can spoof neither the user login nor
+    # a head repo equal to this one. Each bot is bound to its own branch prefixes.
     if: >-
       github.event_name == 'pull_request'
-      && github.event.pull_request.user.login == 'dependabot[bot]'
       && github.event.pull_request.head.repo.full_name == github.repository
-      && startsWith(github.event.pull_request.head.ref, 'dependabot/')
+      && (
+        (github.event.pull_request.user.login == 'dependabot[bot]'
+          && startsWith(github.event.pull_request.head.ref, 'dependabot/'))
+        || (github.event.pull_request.user.login == 'promy-fleet-bot[bot]'
+          && (startsWith(github.event.pull_request.head.ref, 'fix/vuln-')
+            || startsWith(github.event.pull_request.head.ref, 'fix/py-vuln-')))
+      )
     steps:
       # No checkout: the workflow never touches the caller's tree, so there is
       # nothing to check out and no credential to persist.
       - name: Fetch Dependabot metadata
         id: meta
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -94,6 +109,7 @@ jobs:
         env:
           UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
           ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          ACTOR: ${{ github.event.pull_request.user.login }}
           ALLOWED: ${{ inputs.merge-update-types }}
           ECOSYSTEMS: ${{ inputs.ecosystems }}
           EXCLUDE: ${{ inputs.exclude-dependencies }}
@@ -101,6 +117,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -124,33 +141,16 @@ jobs:
           # matches the dependency `typing-extensions`. Applied to both sides.
           norm_name() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[._]/-/g'; }
 
-          gate() {
-            local t permitted=false eco_list eco eco_ok=false pat name hits="" bad n g
-
-            case "$HEAD_REF" in
-              release-please--*) echo "release-please branches are never auto-merged"; return 1 ;;
-            esac
-
-            # Hard-reject majors even if a caller put them in the allowlist.
-            if [ -z "$UPDATE_TYPE" ]; then
-              echo "fetch-metadata reported no update-type"; return 1
-            fi
-            if [ "$UPDATE_TYPE" = "version-update:semver-major" ]; then
-              echo "major updates need a human review"; return 1
-            fi
-            for t in $ALLOWED; do
-              if [ "$t" = "$UPDATE_TYPE" ]; then permitted=true; fi
-            done
-            if [ "$permitted" != "true" ]; then
-              echo "update-type '$UPDATE_TYPE' is not in the allowlist '$ALLOWED'"; return 1
-            fi
-
+          # Ecosystem allowlist. Reads ECOSYSTEM and ECOSYSTEMS; prints the reason and returns 1 to refuse.
+          check_ecosystem() {
+            local eco_list eco eco_ok=false
             # fetch-metadata derives the ecosystem from the branch name
             # (dependabot/<ecosystem>/...): `go_modules` for Go, `uv` for uv,
             # `github_actions` for workflow bumps.
             if [ "$ECOSYSTEM" = "github_actions" ]; then
               echo "github-actions updates need a human merge: GITHUB_TOKEN cannot merge workflow-file changes"; return 1
             fi
+            # shellcheck disable=SC2153 # ECOSYSTEMS (the allowlist) is not a typo of ECOSYSTEM
             eco_list="$(printf '%s' "$ECOSYSTEMS" | tr -d '[:space:]')"
             if ! printf '%s' "$eco_list" | grep -Eq '^[a-z_-]+(,[a-z_-]+)*$'; then
               echo "invalid 'ecosystems' input: want comma-separated names matching [a-z_-]+ (e.g. go_modules,uv)"; return 1
@@ -161,17 +161,21 @@ jobs:
             if [ "$eco_ok" != "true" ]; then
               echo "package-ecosystem '$ECOSYSTEM' is not in the allowed ecosystems '$eco_list'"; return 1
             fi
+            return 0
+          }
 
-            # Excluded dependencies: any name of a (grouped) PR matching any glob refuses
-            # the whole PR. Patterns are validated first, so the unquoted `case` pattern
-            # below cannot expand anything but a glob.
+          # Excluded dependencies: any name of a (grouped) PR matching any glob refuses
+          # the whole PR. Reads EXCLUDE and DEPENDENCIES. Patterns are validated first, so
+          # the unquoted `case` pattern below cannot expand anything but a glob.
+          check_excluded() {
+            local pat name hits="" bad n g
             if [ -n "$(printf '%s' "$EXCLUDE" | tr -d '[:space:],')" ]; then
               bad="$(printf '%s\n' "$EXCLUDE" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -Ev '^$|^[A-Za-z0-9._@/*?+-]+$' || true)"
               if [ -n "$bad" ]; then
                 echo "invalid 'exclude-dependencies' entry: only [A-Za-z0-9._@/*?+-] are allowed in a glob"; return 1
               fi
               if [ -z "$(printf '%s' "$DEPENDENCIES" | tr -d '[:space:],')" ]; then
-                echo "fetch-metadata reported no dependency-names; cannot check exclude-dependencies"; return 1
+                echo "no dependency-names reported; cannot check exclude-dependencies"; return 1
               fi
               while IFS= read -r name; do
                 [ -n "$name" ] || continue
@@ -191,11 +195,186 @@ jobs:
             fi
             return 0
           }
+
+          # Dependabot PRs. Reads HEAD_REF UPDATE_TYPE ALLOWED ECOSYSTEM ECOSYSTEMS DEPENDENCIES EXCLUDE.
+          gate() {
+            local t permitted=false
+
+            case "$HEAD_REF" in
+              release-please--*) echo "release-please branches are never auto-merged"; return 1 ;;
+            esac
+
+            # Hard-reject majors even if a caller put them in the allowlist.
+            if [ -z "$UPDATE_TYPE" ]; then
+              echo "fetch-metadata reported no update-type"; return 1
+            fi
+            if [ "$UPDATE_TYPE" = "version-update:semver-major" ]; then
+              echo "major updates need a human review"; return 1
+            fi
+            for t in $ALLOWED; do
+              if [ "$t" = "$UPDATE_TYPE" ]; then permitted=true; fi
+            done
+            if [ "$permitted" != "true" ]; then
+              echo "update-type '$UPDATE_TYPE' is not in the allowlist '$ALLOWED'"; return 1
+            fi
+
+            check_ecosystem || return 1
+            check_excluded || return 1
+            return 0
+          }
+
+          # Normalise a manifest to `<kind> <name> <version>` lines so base and head can be
+          # compared entry by entry. go.mod: `go` and require lines; every other line is
+          # kept verbatim as `raw`. uv.lock: one `pkg` line per [[package]]; the rest is ignored.
+          manifest_entries() {
+            case "$1" in
+              go.mod|*/go.mod)
+                awk '
+                  /^[[:space:]]*\/\// { next }
+                  { sub(/[[:space:]]*\/\/.*$/, "") }
+                  /^[[:space:]]*$/ { next }
+                  $1 == "require" && $2 == "(" { inreq = 1; next }
+                  inreq && $1 == ")" { inreq = 0; next }
+                  inreq && NF == 2 { print "req", $1, $2; next }
+                  $1 == "require" && NF == 3 { print "req", $2, $3; next }
+                  $1 == "go" && NF == 2 { print "go", "go", $2; next }
+                  { print "raw", $0 }
+                ' "$2" ;;
+              uv.lock|*/uv.lock)
+                awk '
+                  /^\[\[package\]\]/ { name = ""; next }
+                  /^name = "/ { name = $3; gsub(/"/, "", name); next }
+                  /^version = "/ && name != "" { v = $3; gsub(/"/, "", v); print "pkg", name, v; name = "" }
+                ' "$2" ;;
+            esac
+          }
+
+          # Compares two manifest_entries streams (base, head). Prints one `BUMP<TAB>kind<TAB>name<TAB>old<TAB>new`
+          # per changed version, or `ERR<TAB>reason` for an entry added or removed and for any
+          # other changed line.
+          manifest_diff() {
+            awk -v OFS='\t' '
+              FNR == NR { if ($1 == "raw") oraw[$0] = 1; else o[$1 " " $2] = $3; next }
+              $1 == "raw" { nraw[$0] = 1; if (!($0 in oraw)) print "ERR", "line changed outside the version entries: " substr($0, 5); next }
+              { k = $1 " " $2; seen[k] = 1
+                if (!(k in o)) print "ERR", $2 " was added"
+                else if (o[k] != $3) print "BUMP", $1, $2, o[k], $3 }
+              END {
+                for (k in o) if (!(k in seen)) print "ERR", substr(k, index(k, " ") + 1) " was removed"
+                for (r in oraw) if (!(r in nraw)) print "ERR", "line removed outside the version entries: " substr(r, 5)
+              }
+            ' "$1" "$2"
+          }
+
+          # Succeeds when $2 is a release newer than or equal to $1 within the same
+          # major.minor (the third and later components may rise). Pre-releases,
+          # pseudo-versions and anything non-numeric fail.
+          patch_only() {
+            local a="${1#v}" b="${2#v}" i x y
+            local av bv
+            a="${a%+incompatible}"; b="${b%+incompatible}"
+            [[ "$a" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)*$ && "$b" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)*$ ]] || return 1
+            IFS=. read -ra av <<< "$a"
+            IFS=. read -ra bv <<< "$b"
+            [ "$((10#${av[0]}))" -eq "$((10#${bv[0]}))" ] && [ "$((10#${av[1]}))" -eq "$((10#${bv[1]}))" ] || return 1
+            for ((i = 2; i < 8; i++)); do
+              x="$((10#${av[i]:-0}))"; y="$((10#${bv[i]:-0}))"
+              if [ "$y" -gt "$x" ]; then return 0; fi
+              if [ "$y" -lt "$x" ]; then return 1; fi
+            done
+            return 0
+          }
+
+          # promy-fleet-bot vuln-fix PRs. Verifies the diff itself, never the title or body.
+          # Reads HEAD_REF, FLEET_FILES (newline-separated `<status><TAB><path>`), BASE_DIR and
+          # HEAD_DIR (the changed files at the merge base and at the head, under their repo
+          # paths), ECOSYSTEMS and EXCLUDE. On success prints the merge reason; otherwise
+          # prints the refusal reason and returns 1.
+          fleet_gate() {
+            local status file kind="" k ECOSYSTEM DEPENDENCIES="" summary=""
+            local tag kd name old new
+
+            case "$HEAD_REF" in
+              fix/vuln-*) kind=go_modules ;;
+              fix/py-vuln-*) kind=uv ;;
+              *) echo "branch '$HEAD_REF' is not a vuln-fix branch (fix/vuln-*, fix/py-vuln-*)"; return 1 ;;
+            esac
+            if [ -z "$FLEET_FILES" ]; then echo "PR changes no files"; return 1; fi
+
+            while IFS=$'\t' read -r status file; do
+              [ -n "$file" ] || continue
+              if [ "$status" != "modified" ]; then echo "'$file' is $status; only modified files are allowed"; return 1; fi
+              if ! printf '%s' "$file" | grep -Eq '^[A-Za-z0-9._/-]+$' || [[ "$file" == /* || "$file" == *..* ]]; then
+                echo "unexpected file path '$file'"; return 1
+              fi
+              case "${file##*/}" in
+                go.mod|go.sum) k=go_modules ;;
+                uv.lock) k=uv ;;
+                *) echo "'$file' is outside the files a vuln-fix PR may change (go.mod, go.sum, uv.lock)"; return 1 ;;
+              esac
+              if [ "$k" != "$kind" ]; then echo "'$file' does not belong to a '$HEAD_REF' PR"; return 1; fi
+              if [ "${file##*/}" = "go.sum" ]; then continue; fi
+
+              # Same set of names, versions only moving within the same minor, nothing else changed.
+              while IFS=$'\t' read -r tag kd name old new; do
+                [ -n "$tag" ] || continue
+                if [ "$tag" = ERR ]; then echo "$file: $kd"; return 1; fi
+                if ! patch_only "$old" "$new"; then
+                  echo "$file: $name $old -> $new is not a patch-level bump within the same minor"; return 1
+                fi
+                summary="${summary:+$summary, }$name $old -> $new"
+                if [ "$kd" != go ]; then DEPENDENCIES="${DEPENDENCIES:+$DEPENDENCIES, }$name"; fi
+              done < <(manifest_diff <(manifest_entries "$file" "$BASE_DIR/$file") <(manifest_entries "$file" "$HEAD_DIR/$file"))
+            done <<< "$FLEET_FILES"
+
+            if [ -z "$summary" ]; then echo "no version bump found in the diff"; return 1; fi
+            ECOSYSTEM="$kind"
+            check_ecosystem || return 1
+            check_excluded || return 1
+            printf 'patch-level bumps within the same minor, verified from the diff (%s): %s' "$ECOSYSTEM" "$summary"
+            return 0
+          }
           # <<< automerge-gate body
 
-          if ! reason="$(gate)"; then
-            reject "$reason"
-          fi
+          # The PR opener must be allowlisted (the job `if:` is the first line of
+          # defence) and every commit must be authored by that same actor.
+          case "$ACTOR" in
+            "dependabot[bot]")
+              if ! reason="$(gate)"; then
+                reject "$reason"
+              fi
+              merge_reason="$UPDATE_TYPE on $ECOSYSTEM, all commits by $ACTOR"
+              ;;
+            "promy-fleet-bot[bot]")
+              # fetch-metadata does not apply: read the diff itself. The base side
+              # is the merge base, so a base branch that moved on cannot fake a diff.
+              base_dir="$RUNNER_TEMP/fleet/base"
+              head_dir="$RUNNER_TEMP/fleet/head"
+              FLEET_FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate -q '.[] | [.status, .filename] | @tsv')"
+              merge_base="$(gh api "repos/$REPO/compare/$BASE_SHA...$HEAD_SHA" -q .merge_base_commit.sha)"
+              while IFS=$'\t' read -r _ file; do
+                # Same path rule as fleet_gate, which refuses anything else.
+                if ! printf '%s' "$file" | grep -Eq '^[A-Za-z0-9._/-]+$' || [[ "$file" == /* || "$file" == *..* ]]; then
+                  reject "unexpected file path '$file'"
+                fi
+                case "${file##*/}" in
+                  go.mod | uv.lock)
+                    mkdir -p "$base_dir/$(dirname "$file")" "$head_dir/$(dirname "$file")"
+                    gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$merge_base" > "$base_dir/$file"
+                    gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$HEAD_SHA" > "$head_dir/$file"
+                    ;;
+                esac
+              done <<< "$FLEET_FILES"
+              export FLEET_FILES
+              export BASE_DIR="$base_dir" HEAD_DIR="$head_dir"
+              if ! merge_reason="$(fleet_gate)"; then
+                reject "$merge_reason"
+              fi
+              ;;
+            *)
+              reject "actor '$ACTOR' is not an allowlisted bot"
+              ;;
+          esac
 
           # fetch-metadata only verifies the first commit; a human could push
           # more commits onto the branch afterwards. A null author prints "null".
@@ -204,14 +383,14 @@ jobs:
             reject "PR has no commits to verify"
           fi
           for a in "${authors[@]}"; do
-            if [ "$a" != "dependabot[bot]" ]; then
-              reject "PR contains a commit not authored by dependabot[bot] (author: $a)"
+            if [ "$a" != "$ACTOR" ]; then
+              reject "PR contains a commit not authored by $ACTOR (author: $a)"
             fi
           done
 
           {
             echo "merge=true"
-            echo "reason=$UPDATE_TYPE on $ECOSYSTEM, all commits by dependabot[bot]"
+            echo "reason=$merge_reason"
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify checks
@@ -276,7 +455,7 @@ jobs:
             if [ "$i" -lt "$WAIT_ATTEMPTS" ]; then sleep "$WAIT_SECONDS"; fi
           done
 
-          stop "checks still running after ${WAIT_ATTEMPTS}x${WAIT_SECONDS}s; not merging (next Dependabot rebase re-runs CI)"
+          stop "checks still running after ${WAIT_ATTEMPTS}x${WAIT_SECONDS}s; not merging (the next rebase or push re-runs CI)"
 
       - name: Merge
         id: merge
