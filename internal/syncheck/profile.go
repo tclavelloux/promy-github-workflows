@@ -35,6 +35,8 @@ type profile struct {
 	ciMissing    string // message tail when ci.yml is missing
 	precommitTpl string // template named when .pre-commit-config.yaml is missing
 	dependabotTp string // template named when dependabot.yml is missing
+
+	vulnFixWorkflow string // reusable workflow vuln-fix.yml must call, and its concurrency group
 }
 
 const ruleProfile = "profile"
@@ -56,6 +58,8 @@ var goProfile = &profile{
 	ciMissing:    "with jobs lint, vuln, test, coverage, gitleaks (plus docker when a Dockerfile exists)",
 	precommitTpl: "templates/pre-commit-go-vuln.yaml",
 	dependabotTp: "add it with gomod and github-actions ecosystems (see templates/dependabot.yml)",
+
+	vulnFixWorkflow: "go-vuln-fix",
 }
 
 var pythonProfile = &profile{
@@ -73,6 +77,8 @@ var pythonProfile = &profile{
 	ciMissing:    "with jobs lint, typecheck, vuln, test, gitleaks (plus docker when a uv project has a Dockerfile); see templates/python/ci.yml",
 	precommitTpl: "templates/python/pre-commit-config.yaml",
 	dependabotTp: "add it with uv (every uv project), docker (every uv project with a Dockerfile) and github-actions entries (see templates/python/dependabot.yml)",
+
+	vulnFixWorkflow: "python-vuln-fix",
 }
 
 func (c *checker) detectProfile() *profile {

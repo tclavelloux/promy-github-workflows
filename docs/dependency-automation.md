@@ -16,8 +16,9 @@ Tags: `dependabot-automerge/v1(.0.0, .1.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.4
 | Grouped Dependabot config | `templates/dependabot.yml` | none (copied per repo) | ~30 serial go.sum-conflicting PRs become one weekly PR; indirect deps covered |
 | Automerge | `.github/workflows/dependabot-automerge.yml`, `templates/ci-automerge-job.yml` | `dependabot-automerge/v1` | Green patch/minor PRs sit unmerged (gomod by default; `ecosystems: uv` and `exclude-dependencies` from `v1.1.0`) |
 | Vuln fix | `.github/workflows/go-vuln-fix.yml`, `templates/go-vuln-fix-caller.yml` | `go-vuln-fix/v1` | Called advisories wait for a human to notice |
+| Python vuln fix | `.github/workflows/python-vuln-fix.yml`, `templates/python/vuln-fix.yml` | `python-vuln-fix/v1` | OSV-only advisories (PYSEC, no GHSA) that Dependabot's `uv-security` group never fixes wait for a human |
 | Pre-push hook | `hooks/go-vuln.sh`, `.pre-commit-hooks.yaml` | `hooks/v1.1.0` | Advisories surface only after push |
-| Local twin and CI guard | `scripts/go-vuln-fix.sh`, `.github/workflows/ci.yml` | none | Version and fix-logic drift |
+| Local twin and CI guard | `scripts/go-vuln-fix.sh`, `scripts/python_vuln_fix.py`, `.github/workflows/ci.yml`, `internal/syncheck/python_workflows_test.go` | none | Version and fix-logic drift |
 
 ## Decisions
 
@@ -43,6 +44,13 @@ Tags: `dependabot-automerge/v1(.0.0, .1.0)`, `go-vuln-fix/v1(.0.0)`, `hooks/v1.4
   - Official golang images set `GOTOOLCHAIN=local`: a patch- or digest-pinned image cannot build a newer-patch module, so those repos are refused, as are repos with a `toolchain` directive, `go.work`, `.go-version` or a `.tool-versions` Go pin.
   - Tidy, build and the rescan run under `GOTOOLCHAIN=go<target>`; any claimed ID still called aborts the run and restores go.mod/go.sum.
   - `go-patch-bump: false` opts out.
+- Python vuln fix (`python-vuln-fix`):
+  - uv version: read from the caller's `.uv-version`, the pin `python-lint` enforces. Measured 2026-10-22 on promy-market-catalog locks written by Dependabot's uv 0.12.18: a fix run with uv 0.11.13 rewrites 226 lines on `store` and 528 on `leaflet` (adds `marker = ...` to dependency entries), against 0 with uv 0.12.18. The locks stay valid and Dependabot rewrites them on its next PR, but the diff buries the real change. Move the fleet pin to the uv version Dependabot uses before the first run.
+  - Dependabot overlap: keep the `uv-security` groups. They fix GHSA-backed advisories faster; this workflow fills the OSV-only gap. Branch namespaces differ (`dependabot/uv/...` vs `fix/py-vuln-*`), and a run that finds nothing to fix closes a bot-opened `fix/py-vuln-*` PR, so a bump Dependabot landed first leaves no stale PR.
+  - CalVer: the first release segment rising is a major, except when both sides are >= 1000 (certifi `2024.2.2` -> `2026.10.19`, tzdata). Without it every certifi advisory would need a human.
+  - Cascades: uv may move other packages when it resolves a bump. A cascade into an excluded or major-bumped package restores the lock and goes to the issue; other moves are kept and listed in the PR.
+  - Never auto-merged: the PR author is not `dependabot[bot]`, which every caller's automerge job requires, and the workflow itself has no merge step. `exclude-dependencies` should mirror the caller's automerge exclusions.
+  - Branches `fix/py-vuln-<hash>` are separate from Go's `fix/vuln-<hash>`: same dedupe, supersede and rejected-is-permanent rules.
 - Fix PR commit uses GraphQL `createCommitOnBranch`: GitHub signs it and no credentials touch disk.
 - Hook warns unless the pushed range touches `go.mod`/`go.sum`: an advisory published today must not block unrelated pushes, but a dependency edit is where the fix belongs. Manual runs always block.
 - Hook sets `GOTOOLCHAIN` from go.mod: CI resolves the toolchain from go.mod, so local scans on a newer Go understated CVEs (template-go: 8 local vs 30 CI).

@@ -117,6 +117,8 @@ func TestDrift(t *testing.T) {
 		{name: "dependabot missing gomod", edits: []edit{ed(depRel, "package-ecosystem: gomod", "package-ecosystem: pip")}, rules: []string{"dependabot"}, msg: `"gomod"`},
 		{name: "dependabot.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, depRel)) }, rules: []string{"dependabot"}, msg: "file missing"},
 		{name: "vuln-fix wrong permissions", base: "pass-rollout", edits: []edit{ed(vfRel, "issues: write", "issues: read")}, rules: []string{"vuln-fix"}, msg: `job "fix" permissions`},
+		{name: "vuln-fix calls python-vuln-fix", base: "pass-rollout", edits: []edit{ed(vfRel, "go-vuln-fix.yml@go-vuln-fix/v1", "python-vuln-fix.yml@python-vuln-fix/v1")}, rules: []string{"vuln-fix"}, msg: "go-vuln-fix.yml@go-vuln-fix/v1"},
+		{name: "vuln-fix python concurrency group", base: "pass-rollout", edits: []edit{ed(vfRel, "group: go-vuln-fix", "group: python-vuln-fix")}, rules: []string{"vuln-fix"}, msg: "want {group: go-vuln-fix, cancel-in-progress: false}"},
 		{name: "vuln-fix cancel", base: "pass-rollout", edits: []edit{ed(vfRel, "cancel-in-progress: false", "cancel-in-progress: true")}, rules: []string{"vuln-fix"}, msg: "cancel-in-progress"},
 		{name: "vuln-fix push trigger", base: "pass-rollout", edits: []edit{ed(vfRel, "  workflow_dispatch:", "  workflow_dispatch:\n  push:")}, rules: []string{"vuln-fix"}, msg: "schedule"},
 		{name: "vuln-fix secrets inherit", base: "pass-rollout", edits: []edit{ed(vfRel, "    secrets:\n      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}\n      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}\n", "    secrets: inherit\n")}, rules: []string{"vuln-fix"}, msg: "least privilege"},
