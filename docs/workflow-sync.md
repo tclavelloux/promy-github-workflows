@@ -163,11 +163,11 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
 - Cannot stop a caller pinning an old `rev:`. The old policy passes; visible in review only. The `ci-lint-sync` and `precommit-governance-repo` rules need the caller to be on a rev that has them.
 - Cannot stop a caller dropping `with: workflow-sync: true`: `ci-lint-sync` catches it only when the local hook runs.
 - Cannot read repo settings; `GITHUB_TOKEN` has no access. `scripts/check-repo-settings.sh` does, run by hand with the keyring token.
-- `scripts/check-repo-settings.sh` checks per repo:
+- `scripts/check-repo-settings.sh` checks per repo. With no args it discovers the repos (`gh repo list tclavelloux --no-archived`, names matching `promy-*`, this repo included); explicit `owner/repo` args override the list. An empty or failed listing exits 2:
   - Actions default permissions `read`; Actions may NOT create or approve PRs (`can_approve_pull_request_reviews` is `false`). The App opens every fleet bot PR and `dependabot-automerge` only merges, which the setting does not gate.
   - Squash merge on, merge commit off, rebase off. The PR title is the commit release-please parses.
   - Vulnerability alerts enabled; automated security fixes enabled.
-- Output: `ok|FAIL <repo> <check> (got <value>)`. Exit 1 on any FAIL, 2 when `gh` errors. `GH=<path>` swaps the binary for tests.
+- Output: `ok|FAIL <repo> <check> (got <value>)`. Exit 1 on any FAIL, 2 when `gh` errors or the discovered list is empty. `GH=<path>` swaps the binary for tests.
 
 ## Change the policy
 
