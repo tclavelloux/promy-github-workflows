@@ -8,23 +8,31 @@
 # permissions, merge settings or vulnerability-alert state, and a PAT is refused
 # by design (docs/dependency-automation.md).
 #
-# Exit 0: all ok. Exit 1: at least one FAIL. Exit 2: gh itself failed.
+# With no args, checks every non-archived tclavelloux/promy-* repo (gh repo list).
+#
+# Exit 0: all ok. Exit 1: at least one FAIL. Exit 2: gh itself failed or listed no repos.
 # GH=<path> overrides the gh binary (tests stub it).
 set -euo pipefail
 
 GH=${GH:-gh}
-DEFAULT_REPOS=(
-  tclavelloux/promy-template-go
-  tclavelloux/promy-crm
-  tclavelloux/promy-product
-  tclavelloux/promy-user
-  tclavelloux/promy-event-bus
-  tclavelloux/promy-identifier
-)
 if [ "$#" -gt 0 ]; then
   REPOS=("$@")
 else
-  REPOS=("${DEFAULT_REPOS[@]}")
+  # Discover the fleet instead of hardcoding it: every non-archived promy-* repo.
+  # A failed or empty listing must not fall through to checking zero repos.
+  if ! listing="$("$GH" repo list tclavelloux --no-archived --limit 200 \
+    --json nameWithOwner --jq '.[].nameWithOwner | select(test("^tclavelloux/promy-"))' 2>&1)"; then
+    echo "check-repo-settings: gh repo list failed: $listing" >&2
+    exit 2
+  fi
+  if [ -z "$listing" ]; then
+    echo "check-repo-settings: gh repo list returned no promy-* repos" >&2
+    exit 2
+  fi
+  REPOS=()
+  while IFS= read -r line; do
+    REPOS+=("$line")
+  done <<<"$listing"
 fi
 
 failed=0
