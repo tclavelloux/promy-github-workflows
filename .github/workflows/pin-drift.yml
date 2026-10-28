@@ -1,0 +1,67 @@
+# Governance-internal scheduled workflow, not reusable: no tag, no WorkflowMajors entry.
+# Detects manually pinned tool versions that fell behind upstream and keeps ONE rolling
+# issue (marker <!-- pin-drift -->) up to date. Detect-only: it bumps nothing.
+name: Pin drift
+
+on:
+  schedule:
+    - cron: '17 6 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pin-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan pins against upstream
+        id: scan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ runner.temp }}/pin-drift.md
+        run: python3 scripts/pin_drift.py --manifest pin-manifest.json --out "$REPORT"
+
+      - name: Update rolling issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REPORT: ${{ runner.temp }}/pin-drift.md
+          BEHIND: ${{ steps.scan.outputs.behind }}
+          UNKNOWN: ${{ steps.scan.outputs.unknown }}
+        run: |
+          set -euo pipefail
+          marker='<!-- pin-drift -->'
+          title='chore(governance): manually pinned tools behind upstream'
+
+          issues=$(gh issue list --repo "$REPO" --state open --json number,body --limit 200)
+          number=$(jq -r --arg m "$marker" '[.[] | select(.body | contains($m))][0].number // empty' <<< "$issues")
+
+          if [ "$BEHIND" = '0' ] && [ "$UNKNOWN" = '0' ]; then
+            if [ -n "$number" ]; then
+              gh issue close "$number" --repo "$REPO" --comment "All manually pinned tools are current and every upstream lookup succeeded. Closing."
+              echo "Closed issue #$number"
+            else
+              echo "Nothing behind, nothing unknown, no open issue: nothing to do"
+            fi
+            exit 0
+          fi
+
+          if [ -z "$number" ]; then
+            gh issue create --repo "$REPO" --title "$title" --body-file "$REPORT"
+          else
+            gh issue edit "$number" --repo "$REPO" --body-file "$REPORT"
+            echo "Updated issue #$number"
+          fi

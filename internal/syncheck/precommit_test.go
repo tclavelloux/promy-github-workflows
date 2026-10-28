@@ -70,8 +70,8 @@ func TestSyncRulesDrift(t *testing.T) {
 		{name: "hooksPath elsewhere", do: func(t *testing.T, r string) {
 			appendFile(t, r, mkRel, "\nhooks:\n\tgit config core.hooksPath .githooks\n")
 		}, rules: []string{"make-hookspath"}, msg: "mutually exclusive"},
-		{name: "go-test-coverage @latest", edits: []edit{ed(mkRel, "go-test-coverage/v2@v2.19.0", "go-test-coverage/v2@latest")}, rules: []string{"make-coverage-pin", "unpinned-tool"}, msg: "@latest"},
-		{name: "go-test-coverage @v2.18.0", edits: []edit{ed(mkRel, "go-test-coverage/v2@v2.19.0", "go-test-coverage/v2@v2.18.0")}, rules: []string{"make-coverage-pin"}, msg: "go-coverage.yml runs v2.19.0"},
+		{name: "go-test-coverage @latest", edits: []edit{ed(mkRel, "go-test-coverage/v2@v2.20.1", "go-test-coverage/v2@latest")}, rules: []string{"make-coverage-pin", "unpinned-tool"}, msg: "@latest"},
+		{name: "go-test-coverage @v2.19.0", edits: []edit{ed(mkRel, "go-test-coverage/v2@v2.20.1", "go-test-coverage/v2@v2.19.0")}, rules: []string{"make-coverage-pin"}, msg: "go-coverage.yml runs v2.20.1"},
 		{name: "install target missing", edits: []edit{ed(mkRel, "install-go-test-coverage:", "install-cov:")}, rules: []string{"make-coverage-pin"}, msg: "no `install-go-test-coverage` target"},
 		{name: "check-coverage target missing", edits: []edit{ed(mkRel, "check-coverage: install-go-test-coverage", "check-cov: install-go-test-coverage")}, rules: []string{"make-coverage-pin"}, msg: "no `check-coverage` target"},
 		{name: "go install @latest in another target", do: func(t *testing.T, r string) {

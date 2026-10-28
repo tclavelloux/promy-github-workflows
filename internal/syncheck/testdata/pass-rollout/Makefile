@@ -37,7 +37,7 @@ lint:
 
 # Pinned to the version promy-github-workflows' go-coverage.yml runs in CI; bump both together.
 install-go-test-coverage:
-	go install github.com/vladopajic/go-test-coverage/v2@v2.19.0
+	go install github.com/vladopajic/go-test-coverage/v2@v2.20.1
 
 check-coverage: install-go-test-coverage
 	go test -race -failfast -coverpkg=./... -covermode=atomic -coverprofile=coverage.out -count=1 ./...

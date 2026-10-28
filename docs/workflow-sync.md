@@ -95,7 +95,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 |---|---|---|
 | `make-setup` | `setup:` recipe is exactly `pre-commit install --install-hooks` | One bootstrap command |
 | `make-hookspath` | No `core.hooksPath` anywhere in the Makefile | pre-commit refuses to install while it is set |
-| `make-coverage-pin` | Python: a `check-coverage:` target exists. Go: `install-go-test-coverage:` installs `github.com/vladopajic/go-test-coverage/v2@v2.19.0` (policy version); `check-coverage:` target exists | Local tool equals the CI action version |
+| `make-coverage-pin` | Python: a `check-coverage:` target exists. Go: `install-go-test-coverage:` installs `github.com/vladopajic/go-test-coverage/v2@v2.20.1` (policy version); `check-coverage:` target exists | Local tool equals the CI action version |
 
 ### Repo files
 
