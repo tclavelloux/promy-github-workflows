@@ -2,6 +2,7 @@ package syncheck
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -124,6 +125,7 @@ func (c *checker) checkPreCommit() {
 
 	c.checkInstallTypes(root)
 	c.checkDefaultStages(root)
+	c.checkManifestStages(repos)
 	c.checkGovernanceRepo(repos)
 	c.checkRevs(repos)
 	c.checkCoverageHook(repos)
@@ -160,6 +162,42 @@ func (c *checker) checkDefaultStages(root *yaml.Node) {
 	}
 	if !ok || !sameSet(norm, want) {
 		c.add(PreCommitConfig, k.Line, rulePCDefaultStage, "default_stages = %s; want %s", fmtSet(got), fmtSet(want))
+	}
+}
+
+// manifestStageHooks lists pre-commit-hooks ids whose upstream manifest (v4.6.0,
+// v5.0.0) declares `stages: [pre-commit, pre-push, manual]`. A manifest-level
+// `stages` is not overridden by default_stages, so without an explicit
+// `stages: [pre-commit]` on the config entry the hook also runs at pre-push.
+var manifestStageHooks = []string{"trailing-whitespace", "end-of-file-fixer", "check-added-large-files"}
+
+const preCommitHooksRepoURL = "https://github.com/pre-commit/pre-commit-hooks"
+
+func (c *checker) checkManifestStages(repos []*pcRepo) {
+	for _, r := range repos {
+		if normRepoURL(r.url) != preCommitHooksRepoURL {
+			continue
+		}
+		for _, h := range r.hooks {
+			if !slices.Contains(manifestStageHooks, h.id) {
+				continue
+			}
+			sn := val(h.node, "stages")
+			got, ok := strSet(sn)
+			norm := map[string]bool{}
+			for s := range got {
+				norm[normStage(s)] = true
+			}
+			if ok && sameSet(norm, setOf("pre-commit")) {
+				continue
+			}
+			state := "absent"
+			if sn != nil {
+				state = fmtSet(got)
+			}
+			c.add(PreCommitConfig, line(sn, h.line), rulePCDefaultStage,
+				"hook %q stages is %s; add `stages: [pre-commit]` to it (the pre-commit-hooks manifest declares pre-push, which default_stages does not override)", h.id, state)
+		}
 	}
 }
 
