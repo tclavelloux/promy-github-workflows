@@ -408,6 +408,16 @@ Map them explicitly as in the snippet; never `secrets: inherit` (`workflow-sync`
 
 Needs `contents: write` and `pull-requests: write`; the caller job must grant exactly these.
 
+## `pin-drift.yml`
+
+Monthly (`cron: '17 6 1 * *'`) and on `workflow_dispatch`. Governance-internal: not reusable, no tag, no `WorkflowMajors` entry.
+
+- Reads `pin-manifest.json`, compares every manually pinned tool version with its upstream latest, and keeps one rolling issue (marker `<!-- pin-drift -->`) listing pins that are behind.
+- A failed upstream lookup is listed as `unknown`, never as current. The issue is closed when nothing is behind and nothing is unknown.
+- Permissions: `contents: read`, `issues: write`. Detect-only: it merges and bumps nothing.
+- `internal/syncheck/pin_manifest_test.go` fails when a root `.*-version` file or a `policy.go` `*Version` constant has no manifest entry.
+- Manifest format and bump procedures: [docs/pin-bumps.md](docs/pin-bumps.md).
+
 ## `go-vuln-fix.yml`
 
 Weekly, patches the advisories govulncheck reports as **called** and opens a `fix(deps)` PR. Tag `go-vuln-fix/v1`.
