@@ -6,7 +6,7 @@ import "fmt"
 const (
 	GovernanceRepo = "tclavelloux/promy-github-workflows"
 
-	GoTestCoverageVersion = "2.19.0"
+	GoTestCoverageVersion = "2.20.1"
 	GolangciLintVersion   = "2.13.2"
 
 	// Python tool versions. Ruff and osv-scanner are decided by the reusable

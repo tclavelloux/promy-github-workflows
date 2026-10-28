@@ -77,7 +77,7 @@ jobs:
         # Deliberately non-fatal here: a failing gate is exactly when the PR comment
         # is most useful, so post it first and re-fail in the last step.
         continue-on-error: true
-        uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
+        uses: vladopajic/go-test-coverage@239670d50ed072bfce8b9ab1765227a53429d664 # v2.20.1
         with:
           config: ./.testcoverage.yml
           profile: ${{ inputs.profile-filename }}
@@ -102,7 +102,7 @@ jobs:
           # exclusion logic is re-implemented, and the raw profile is never re-read.
           TOTAL_PCT=$(awk -F';' '{t+=$2; c+=$3} END {printf "%.1f", (t>0 ? c/t*100 : 0)}' "$BREAKDOWN_FILE")
 
-          # go-test-coverage v2.19.0 emits breakdown names already relative to the
+          # go-test-coverage (observed on v2.19.0) emits breakdown names relative to the
           # module (`db/seeds/foo.go`), so this strip is a no-op today — kept as a
           # guard in case a future version emits full import paths. substr(), not a
           # regex sub(), so the dots in a module path cannot partially match.
