@@ -9,6 +9,7 @@ import (
 
 const (
 	rulePCInstallTypes = "precommit-install-types"
+	rulePCDefaultStage = "precommit-default-stages"
 	rulePCGovRepo      = "precommit-governance-repo"
 	rulePCRev          = "precommit-rev"
 	rulePCCoverageHook = "precommit-coverage-hook"
@@ -17,7 +18,7 @@ const (
 	ruleVulnTarget     = "vuln-target"
 )
 
-var _ = register(rulePCInstallTypes, rulePCGovRepo, rulePCRev, rulePCCoverageHook, rulePCNoTestHook, rulePCCommitMsg, ruleVulnTarget)
+var _ = register(rulePCInstallTypes, rulePCDefaultStage, rulePCGovRepo, rulePCRev, rulePCCoverageHook, rulePCNoTestHook, rulePCCommitMsg, ruleVulnTarget)
 
 var immutableHookRev = regexp.MustCompile(`^hooks/v\d+\.\d+\.\d+$`)
 
@@ -122,6 +123,7 @@ func (c *checker) checkPreCommit() {
 	repos := readPCRepos(root)
 
 	c.checkInstallTypes(root)
+	c.checkDefaultStages(root)
 	c.checkGovernanceRepo(repos)
 	c.checkRevs(repos)
 	c.checkCoverageHook(repos)
@@ -140,6 +142,24 @@ func (c *checker) checkInstallTypes(root *yaml.Node) {
 	}
 	if got, ok := strSet(n); !ok || !sameSet(got, want) {
 		c.add(PreCommitConfig, k.Line, rulePCInstallTypes, "default_install_hook_types = %s; want %s", fmtSet(got), fmtSet(want))
+	}
+}
+
+func (c *checker) checkDefaultStages(root *yaml.Node) {
+	k, n := get(root, "default_stages")
+	want := setOf("pre-commit")
+	if k == nil {
+		c.add(PreCommitConfig, 0, rulePCDefaultStage,
+			"default_stages is absent; hooks without `stages:` then run at every installed stage (gitleaks twice per commit); want %s", fmtSet(want))
+		return
+	}
+	got, ok := strSet(n)
+	norm := map[string]bool{}
+	for s := range got {
+		norm[normStage(s)] = true
+	}
+	if !ok || !sameSet(norm, want) {
+		c.add(PreCommitConfig, k.Line, rulePCDefaultStage, "default_stages = %s; want %s", fmtSet(got), fmtSet(want))
 	}
 }
 

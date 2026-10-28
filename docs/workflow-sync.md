@@ -81,6 +81,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | Rule | Invariant | Why |
 |---|---|---|
 | `precommit-install-types` | `default_install_hook_types` = {pre-commit, commit-msg, pre-push} | One `pre-commit install` wires every stage |
+| `precommit-default-stages` | `default_stages` = {pre-commit} (the legacy name `commit` is accepted) | A hook with no `stages:` runs at every installed stage; without this, gitleaks and the other file hooks run again at commit-msg and pre-push |
 | `precommit-governance-repo` | Exactly one entry for `https://github.com/tclavelloux/promy-github-workflows`; `rev` matches `^hooks/v\d+\.\d+\.\d+$`; hooks include `no-direct-commit-to-main` and `workflow-sync` | Immutable rev; the branch guard is early local feedback; the server-side ruleset is the enforcement |
 | `precommit-rev` | No repo `rev` is `main`, `master` or `HEAD` | pre-commit never re-resolves a moving rev |
 | `precommit-coverage-hook` | Local hook `check-coverage`: entry `make check-coverage`, `language: system`, `pass_filenames: false`, `always_run: true`, `stages: [pre-push]` | Local coverage gate matches CI |

@@ -37,6 +37,9 @@ func TestSyncRulesDrift(t *testing.T) {
 	}{
 		{name: "install types missing pre-push", edits: []edit{ed(pcRel, "[pre-commit, commit-msg, pre-push]", "[pre-commit, commit-msg]")}, rules: []string{"precommit-install-types"}, msg: "{commit-msg, pre-commit}"},
 		{name: "install types absent", edits: []edit{ed(pcRel, "default_install_hook_types: [pre-commit, commit-msg, pre-push]\n", "")}, rules: []string{"precommit-install-types"}, msg: "absent"},
+		{name: "default stages absent", edits: []edit{ed(pcRel, "default_stages: [pre-commit]\n", "")}, rules: []string{"precommit-default-stages"}, msg: "absent"},
+		{name: "default stages includes pre-push", edits: []edit{ed(pcRel, "default_stages: [pre-commit]", "default_stages: [pre-commit, pre-push]")}, rules: []string{"precommit-default-stages"}, msg: "{pre-commit, pre-push}"},
+		{name: "default stages legacy commit name is fine", edits: []edit{ed(pcRel, "default_stages: [pre-commit]", "default_stages: [commit]")}},
 		{name: "governance rev hooks/v1", edits: []edit{ed(pcRel, "rev: hooks/v1.2.0", "rev: hooks/v1")}, rules: []string{"precommit-governance-repo"}, msg: "resolves a moving tag"},
 		{name: "governance rev main", edits: []edit{ed(pcRel, "rev: hooks/v1.2.0", "rev: main")}, rules: []string{"precommit-governance-repo", "precommit-rev"}, msg: `"main"`},
 		{name: "branch guard missing", edits: []edit{ed(pcRel, "      - id: no-direct-commit-to-main\n", "")}, rules: []string{"precommit-governance-repo"}, msg: "no-direct-commit-to-main"},
@@ -49,7 +52,9 @@ func TestSyncRulesDrift(t *testing.T) {
 		{name: "check-coverage wrong entry", edits: []edit{ed(pcRel, "entry: make check-coverage", "entry: make test")}, rules: []string{"precommit-coverage-hook"}, msg: "make check-coverage"},
 		{name: "check-coverage missing", edits: []edit{ed(pcRel, "- id: check-coverage", "- id: cover")}, rules: []string{"precommit-coverage-hook"}, msg: "no `repo: local` hook"},
 		{name: "extra test hook at pre-push", do: func(t *testing.T, r string) { appendFile(t, r, pcRel, localHook("test", "make test", "[pre-push]")) }, rules: []string{"precommit-no-test-hook"}, msg: "duplicates the suite"},
-		{name: "pre-push hook running go test", do: func(t *testing.T, r string) { appendFile(t, r, pcRel, localHook("unit", "go test ./...", "")) }, rules: []string{"precommit-no-test-hook"}, msg: "go test ./..."},
+		{name: "pre-push hook running go test", do: func(t *testing.T, r string) {
+			appendFile(t, r, pcRel, localHook("unit", "go test ./...", "[pre-commit, pre-push]"))
+		}, rules: []string{"precommit-no-test-hook"}, msg: "go test ./..."},
 		{name: "go test hook at pre-commit only is fine", do: func(t *testing.T, r string) {
 			appendFile(t, r, pcRel, localHook("unit", "go test ./...", "[pre-commit]"))
 		}},
