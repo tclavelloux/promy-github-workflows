@@ -1,6 +1,8 @@
 # `pre-commit install` only writes the hook types listed here. Without this line it writes
 # .git/hooks/pre-commit alone, and the commit-msg and pre-push stages below never fire.
 default_install_hook_types: [pre-commit, commit-msg, pre-push]
+# Hooks that declare no `stages` would otherwise also run at commit-msg and pre-push.
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/tclavelloux/promy-github-workflows
@@ -13,8 +15,11 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        stages: [pre-commit]
       - id: end-of-file-fixer
+        stages: [pre-commit]
       - id: check-added-large-files
+        stages: [pre-commit]
       - id: check-yaml
 
   - repo: https://github.com/compilerla/conventional-pre-commit

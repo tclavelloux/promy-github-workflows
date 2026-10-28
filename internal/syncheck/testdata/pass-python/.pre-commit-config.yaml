@@ -21,8 +21,10 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
+      # The manifest declares pre-push on these hooks; default_stages does not override it.
       # Model weights and scraped data stay out of git (see .gitignore).
       - id: check-added-large-files
+        stages: [pre-commit]
         args: [--maxkb=1024]
 
   - repo: https://github.com/compilerla/conventional-pre-commit
