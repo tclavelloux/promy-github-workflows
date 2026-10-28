@@ -1,0 +1,188 @@
+{
+  "pins": [
+    {
+      "name": "uv",
+      "upstream": {
+        "repo": "astral-sh/uv",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "internal/syncheck/policy.go",
+          "const": "UVVersion"
+        }
+      ]
+    },
+    {
+      "name": "ruff",
+      "upstream": {
+        "repo": "astral-sh/ruff",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "internal/syncheck/policy.go",
+          "const": "RuffVersion"
+        }
+      ]
+    },
+    {
+      "name": "osv-scanner",
+      "upstream": {
+        "repo": "google/osv-scanner",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "internal/syncheck/policy.go",
+          "const": "OSVScannerVersion"
+        },
+        {
+          "file": ".osv-scanner-version"
+        }
+      ]
+    },
+    {
+      "name": "govulncheck",
+      "upstream": {
+        "repo": "golang/vuln",
+        "kind": "tag",
+        "prefix": "v"
+      },
+      "locations": [
+        {
+          "file": ".govulncheck-version"
+        }
+      ]
+    },
+    {
+      "name": "golangci-lint",
+      "upstream": {
+        "repo": "golangci/golangci-lint",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "internal/syncheck/policy.go",
+          "const": "GolangciLintVersion"
+        }
+      ]
+    },
+    {
+      "name": "go-test-coverage",
+      "upstream": {
+        "repo": "vladopajic/go-test-coverage",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "internal/syncheck/policy.go",
+          "const": "GoTestCoverageVersion"
+        }
+      ]
+    },
+    {
+      "name": "actionlint",
+      "upstream": {
+        "repo": "rhysd/actionlint",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": ".actionlint-version"
+        }
+      ]
+    },
+    {
+      "name": "zizmor",
+      "upstream": {
+        "repo": "zizmorcore/zizmor",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": ".zizmor-version"
+        }
+      ]
+    },
+    {
+      "name": "governance hooks rev (python template)",
+      "upstream": {
+        "repo": "tclavelloux/promy-github-workflows",
+        "kind": "tag",
+        "prefix": "hooks/v"
+      },
+      "locations": [
+        {
+          "file": "templates/python/pre-commit-config.yaml",
+          "pattern": "promy-github-workflows\\n\\s*rev:\\s*hooks/v(\\S+)"
+        }
+      ]
+    },
+    {
+      "name": "pre-commit-hooks (python template)",
+      "upstream": {
+        "repo": "pre-commit/pre-commit-hooks",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "templates/python/pre-commit-config.yaml",
+          "pattern": "pre-commit/pre-commit-hooks\\n\\s*rev:\\s*v?(\\S+)"
+        }
+      ]
+    },
+    {
+      "name": "conventional-pre-commit (python template)",
+      "upstream": {
+        "repo": "compilerla/conventional-pre-commit",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "templates/python/pre-commit-config.yaml",
+          "pattern": "compilerla/conventional-pre-commit\\n\\s*rev:\\s*v?(\\S+)"
+        }
+      ]
+    },
+    {
+      "name": "gitleaks (python template)",
+      "upstream": {
+        "repo": "gitleaks/gitleaks",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "templates/python/pre-commit-config.yaml",
+          "pattern": "gitleaks/gitleaks\\n\\s*rev:\\s*v?(\\S+)"
+        }
+      ]
+    },
+    {
+      "name": "uv-pre-commit (python template)",
+      "upstream": {
+        "repo": "astral-sh/uv-pre-commit",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "templates/python/pre-commit-config.yaml",
+          "pattern": "astral-sh/uv-pre-commit\\n\\s*rev:\\s*v?(\\S+)"
+        }
+      ]
+    },
+    {
+      "name": "ruff-pre-commit (python template)",
+      "upstream": {
+        "repo": "astral-sh/ruff-pre-commit",
+        "kind": "release"
+      },
+      "locations": [
+        {
+          "file": "templates/python/pre-commit-config.yaml",
+          "pattern": "astral-sh/ruff-pre-commit\\n\\s*rev:\\s*v?(\\S+)"
+        }
+      ]
+    }
+  ]
+}
