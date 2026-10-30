@@ -1,0 +1,37 @@
+name: Docs Lint
+
+# For docs-only repos (the workflow-sync `docs` profile): no Go and no Python, so
+# neither go-lint nor python-lint can host the fleet governance check. The single
+# job `lint` keeps the caller's check name `lint / lint`. It runs only
+# `workflow-sync`; add nothing heavier here, every docs repo pays for it.
+#
+# Policy and code come from the caller's immutable hook `rev:`, so the local hook
+# and this job run the identical check. Requires `- id: workflow-sync` under the
+# promy-github-workflows entry of the caller's .pre-commit-config.yaml and a
+# `.workflow-sync-profile` file holding `docs`.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The hook is `language: golang` and a docs repo has no go.mod, so Go is
+      # set up here with no version file, as in python-lint.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+
+      - name: Check fleet governance (workflow-sync)
+        env:
+          PRE_COMMIT_VERSION: 4.6.0
+        run: pipx run --spec "pre-commit==${PRE_COMMIT_VERSION}" pre-commit run workflow-sync --all-files --color=never

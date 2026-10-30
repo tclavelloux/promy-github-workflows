@@ -1,7 +1,9 @@
 package syncheck
 
 import (
+	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	posixpath "path"
 	"path/filepath"
@@ -10,9 +12,14 @@ import (
 )
 
 // A profile is the policy for one kind of repo. Detection (first match wins):
-//  1. a regular file go.mod at the root: Go
-//  2. any tracked uv.lock or pyproject.toml: Python
-//  3. neither: a `profile` violation and nothing else is checked
+//  1. a regular file .workflow-sync-profile at the root: docs when it holds
+//     `docs`, else a `profile` violation. The marker is explicit: a repo with no
+//     code cannot be told apart from a misconfigured one by what it lacks.
+//     A marker next to a root go.mod or a tracked uv.lock/pyproject.toml is also
+//     a violation: letting either side win would silently drop gates.
+//  2. a regular file go.mod at the root: Go
+//  3. any tracked uv.lock or pyproject.toml: Python
+//  4. none: a `profile` violation and nothing else is checked
 //
 // A repo with both a root go.mod and Python files is a Go repo: the Go gates
 // are the stricter, established set, and a Go service may carry Python tooling.
@@ -81,14 +88,47 @@ var pythonProfile = &profile{
 	vulnFixWorkflow: "python-vuln-fix",
 }
 
+var docsProfile = &profile{
+	name:         "docs",
+	requiredJobs: DocsCIRequiredJobs,
+	optionalJobs: CIOptionalJobs,
+	reusableJobs: DocsCIReusableJobs,
+	noPermJobs:   DocsCINoPermJobs,
+	ciMissing:    "with jobs lint, gitleaks; see templates/docs/ci.yml",
+	precommitTpl: "templates/docs/pre-commit-config.yaml",
+	dependabotTp: "add it with a github-actions entry at \"/\" (see templates/docs/dependabot.yml)",
+}
+
+// detectProfile returns the repo's profile, or nil with c.profileMsg set to the
+// reason (empty: nothing matched).
 func (c *checker) detectProfile() *profile {
+	c.profileMsg = ""
+	var code []string
 	if c.isRegularFile("go.mod") {
-		return goProfile
+		code = append(code, "go.mod")
 	}
 	for _, f := range c.trackedFiles() {
 		if b := posixpath.Base(f); b == "uv.lock" || b == "pyproject.toml" {
-			return pythonProfile
+			code = append(code, f)
 		}
+	}
+	if c.isRegularFile(ProfileMarkerFile) {
+		data, _ := os.ReadFile(filepath.Join(c.root, ProfileMarkerFile))
+		switch got := strings.TrimSpace(string(data)); {
+		case got != DocsProfileName:
+			c.profileMsg = fmt.Sprintf("%s holds %q; want %q (the only marker value); nothing else was checked", ProfileMarkerFile, got, DocsProfileName)
+			return nil
+		case len(code) > 0:
+			c.profileMsg = fmt.Sprintf("%s selects the docs profile but %s exists; remove one (a docs repo has no code, and a Go or Python repo must not lose its gates); nothing else was checked", ProfileMarkerFile, strings.Join(code, ", "))
+			return nil
+		}
+		return docsProfile
+	}
+	if c.isRegularFile("go.mod") {
+		return goProfile
+	}
+	if len(code) > 0 {
+		return pythonProfile
 	}
 	return nil
 }

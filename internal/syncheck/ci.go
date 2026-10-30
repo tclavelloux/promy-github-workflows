@@ -2,6 +2,7 @@ package syncheck
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -98,12 +99,15 @@ func (c *checker) checkCI() {
 		}
 	}
 	c.ciJobPermissions(byName)
-	if c.prof == goProfile {
+	switch c.prof {
+	case goProfile:
 		c.ciArtifact(byName)
-	} else {
+	case pythonProfile:
 		c.ciProjects(byName)
 	}
-	c.ciLintSync(byName)
+	if c.prof != docsProfile { // docs-lint always runs workflow-sync; it has no input to switch off
+		c.ciLintSync(byName)
+	}
 	c.ciAutomerge(order, byName)
 }
 
@@ -157,7 +161,15 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 	for _, n := range optional {
 		allowed[n] = true
 	}
-	allowed[CIDockerJob] = true
+	if c.prof == docsProfile {
+		for _, j := range order {
+			if slices.Contains(DocsCIForbiddenJobs, j.name) {
+				c.add(ciFile, j.line(), ruleCIJobs, "job %q is not allowed in the docs profile (the repo has no code to build, test or scan); remove it", j.name)
+			}
+		}
+	} else {
+		allowed[CIDockerJob] = true
+	}
 
 	for _, n := range required {
 		if _, ok := byName[n]; !ok {
@@ -165,7 +177,10 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 		}
 	}
 	_, hasDocker := byName[CIDockerJob]
-	if c.prof == goProfile {
+	switch c.prof {
+	case docsProfile:
+		// docker is forbidden outright, reported above
+	case goProfile:
 		hasDockerfile := c.isRegularFile("Dockerfile")
 		switch {
 		case hasDockerfile && !hasDocker:
@@ -173,7 +188,7 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 		case !hasDockerfile && hasDocker:
 			c.add(ciFile, byName[CIDockerJob].line(), ruleCIJobs, "job %q is present but there is no Dockerfile at the repo root; remove the job (libraries have no image to build)", CIDockerJob)
 		}
-	} else {
+	default:
 		images := c.dockerProjects()
 		switch {
 		case len(images) > 0 && !hasDocker:
@@ -183,8 +198,15 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 		}
 	}
 	for _, j := range order {
+		if c.prof == docsProfile && slices.Contains(DocsCIForbiddenJobs, j.name) {
+			continue // reported above
+		}
 		if !allowed[j.name] {
-			c.add(ciFile, j.line(), ruleCIJobs, "unknown job %q; allowed: %s", j.name, strings.Join(append(append(append([]string{}, required...), CIDockerJob), optional...), ", "))
+			list := append(append([]string{}, required...), optional...)
+			if c.prof != docsProfile {
+				list = append(append(append([]string{}, required...), CIDockerJob), optional...)
+			}
+			c.add(ciFile, j.line(), ruleCIJobs, "unknown job %q; allowed: %s", j.name, strings.Join(list, ", "))
 		}
 	}
 }

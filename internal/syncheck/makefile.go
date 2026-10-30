@@ -113,10 +113,13 @@ func (c *checker) checkMakefile() {
 		}
 	}
 
-	if c.prof == goProfile {
+	switch c.prof {
+	case goProfile:
 		c.checkMakeCoverage(mk)
-	} else if mk.targets["check-coverage"] == nil {
-		c.add(MakefileRel, 0, ruleMakeCoveragePin, "no `check-coverage` target; the pre-push coverage hook runs `make check-coverage` (pytest --cov per tested project)")
+	case pythonProfile:
+		if mk.targets["check-coverage"] == nil {
+			c.add(MakefileRel, 0, ruleMakeCoveragePin, "no `check-coverage` target; the pre-push coverage hook runs `make check-coverage` (pytest --cov per tested project)")
+		}
 	}
 
 	for _, name := range sortedKeys(mk.targets) {

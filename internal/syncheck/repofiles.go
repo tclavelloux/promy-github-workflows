@@ -20,12 +20,13 @@ var _ = register(ruleNoGithooks, ruleGolangciVersion, ruleTestCoverage)
 
 func (c *checker) checkRepoFiles() {
 	c.checkGithooks()
-	if c.prof == pythonProfile {
+	switch c.prof {
+	case pythonProfile:
 		c.checkPythonRepoFiles()
-		return
+	case goProfile:
+		c.checkGolangciVersion()
+		c.checkTestCoverage()
 	}
-	c.checkGolangciVersion()
-	c.checkTestCoverage()
 }
 
 // trackedGithooks lists tracked .githooks files when root is the git toplevel,

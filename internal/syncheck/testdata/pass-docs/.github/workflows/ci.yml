@@ -1,0 +1,46 @@
+# Canonical .github/workflows/ci.yml for a docs-only repo (workflow-sync docs
+# profile: a root .workflow-sync-profile file holding `docs`, no go.mod, no uv.lock).
+#
+# - Required jobs: lint, gitleaks. test, coverage, vuln, docker and typecheck are
+#   forbidden: there is no code to build, test or scan.
+# - `lint` calls docs-lint, whose only step is the workflow-sync check. It takes no
+#   inputs; the check name is `lint / lint`. Add it to the protect-main required checks.
+# - Never path-filter a job: a required check that does not run blocks the PR.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/docs-lint.yml@docs-lint/v1
+
+  gitleaks:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # gitleaks-action reads GET /repos/{repo}/pulls/{n}/commits to scope the scan
+    # to the PR's commit range, so it needs pull-requests: read. It posts nothing.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

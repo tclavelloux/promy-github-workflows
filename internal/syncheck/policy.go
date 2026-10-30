@@ -45,6 +45,7 @@ var WorkflowMajors = map[string]int{
 	"python-test":          1,
 	"python-docker":        1,
 	"python-vuln-fix":      1,
+	"docs-lint":            1,
 	"release-please":       1,
 }
 
@@ -79,6 +80,21 @@ var (
 	// PyCIAllProjectJobs must list every uv project in with.projects; docker
 	// lists every uv project that has a Dockerfile.
 	PyCIAllProjectJobs = []string{"lint", "typecheck", "vuln", "test"}
+)
+
+// Job sets of ci.yml in the docs profile: a repo with no code has nothing to
+// build, test or scan. automerge is optional, as in the other profiles.
+var (
+	DocsCIRequiredJobs  = []string{"lint", "gitleaks"}
+	DocsCIForbiddenJobs = []string{"test", "coverage", "vuln", "docker", "typecheck"}
+	DocsCIReusableJobs  = map[string]string{"lint": "docs-lint", "automerge": "dependabot-automerge"}
+	DocsCINoPermJobs    = []string{"lint"}
+)
+
+// ProfileMarkerFile selects the docs profile; its content is DocsProfileName.
+const (
+	ProfileMarkerFile = ".workflow-sync-profile"
+	DocsProfileName   = "docs"
 )
 
 type perms map[string]string
