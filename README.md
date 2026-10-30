@@ -148,6 +148,7 @@ The bare `v1`, `v1.1.0`, `v2`, `v2.0.0` tags are **deprecated** — retained onl
 | `python-docker.yml` | `python-docker/v1` | New; own tag namespace. |
 | `python-vuln-fix.yml` | `python-vuln-fix/v1` | New; own tag namespace. Writes (App token, PR, issue), so it is not one of the five read-only Python workflows. `OSVScannerVersion` in `policy.go` and `python-vuln.yml` tie to its `osv-scanner-*` defaults. `workflow-sync` checks its caller from `hooks/v1.5.0`. |
 | `release-please.yml` | `release-please/v1` | New; own tag namespace. `workflow-sync` checks its caller from `hooks/v1.6.0`. |
+| `docs-lint.yml` | `docs-lint/v1` | New; own tag namespace. Tag cut after merge. For docs-only repos; runs `workflow-sync` and nothing else. |
 | `.pre-commit-hooks.yaml` | `hooks/v1.6.0` (latest: `workflow-sync` requires the reusable release-please caller and the two-bot automerge `if:`; `hooks/v1.5.x` checks the python-vuln-fix caller; `hooks/v1.4.0` adds `py-vuln` and the Python profile of `workflow-sync`; `hooks/v1.3.0` accepts the go-vuln-fix App secrets; `hooks/v1.2.0` added `workflow-sync`; `hooks/v1.1.0` added `go-vuln`) | Not a workflow — the pre-commit hook manifest at the repo root. One namespace for every hook it declares, since pre-commit resolves the whole repo at one `rev`. **Callers pin the immutable tag, not the moving `hooks/v1` alias** — see below. |
 
 ## `go-vuln.yml`
@@ -721,6 +722,24 @@ Per project: `docker/build-push-action` (context = the project directory, `linux
 | `dockerfile` | `Dockerfile` | Dockerfile path relative to each project directory |
 | `smoke-command` | `python main.py --help` | Command run in the image; must exit 0. Word-split, not globbed |
 
+## `docs-lint.yml`
+
+Fleet governance for a docs-only repo (no `go.mod`, no `uv.lock`): the one place `workflow-sync` can run in CI there, since `go-lint` and `python-lint` need code. Single job `lint` (check name `lint / lint`); its steps are checkout, `setup-go` (the hook is `language: golang`) and `pre-commit run workflow-sync --all-files`. No inputs, no secrets, `contents: read`.
+
+```yaml
+jobs:
+  lint:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/docs-lint.yml@docs-lint/v1
+```
+
+- Profile: a root `.workflow-sync-profile` file holding `docs`. With a root `go.mod` or a tracked `uv.lock`/`pyproject.toml` beside it, `workflow-sync` reports `profile` instead of picking one.
+- `ci.yml`: required `lint`, `gitleaks`; `test`, `coverage`, `vuln`, `docker`, `typecheck` forbidden; `automerge` optional. No `release-please.yml` needed.
+- The caller's `.pre-commit-config.yaml` needs `- id: workflow-sync` at an immutable `hooks/vX.Y.Z` that has the docs profile.
+- Never path-filter the job.
+
+Start from `templates/docs/` (`ci.yml`, `dependabot.yml`, `pre-commit-config.yaml`, `Makefile`); a Go test proves it passes. Rule catalogue: [docs/workflow-sync.md](docs/workflow-sync.md).
+
 ## Shared pre-commit hooks
 
 `.pre-commit-hooks.yaml` at the repo root makes this repo a pre-commit **remote hook repository**, alongside its reusable workflows. Callers add it to their own `.pre-commit-config.yaml`:
@@ -811,13 +830,13 @@ Bypass once: `SKIP=py-vuln git push`.
 
 ### `workflow-sync`
 
-Checks the repo's CI wiring against the fleet policy at the caller's pinned `rev:`: `ci.yml` shape, `pr-title.yml`, `release-please.yml`, `dependabot.yml`, SHA-pinned actions, `.pre-commit-config.yaml`, `Makefile` and the pinned tool files, with the Go or the Python profile (see [Python workflows](#workflow-sync-python-profile)). `language: golang`, so the system `go` must be on `PATH`. Stages: `pre-commit`, `manual`.
+Checks the repo's CI wiring against the fleet policy at the caller's pinned `rev:`: `ci.yml` shape, `pr-title.yml`, `release-please.yml`, `dependabot.yml`, SHA-pinned actions, `.pre-commit-config.yaml`, `Makefile` and the pinned tool files, with the Go, Python (see [Python workflows](#workflow-sync-python-profile)) or docs (see [`docs-lint.yml`](#docs-lintyml)) profile. `language: golang`, so the system `go` must be on `PATH`. Stages: `pre-commit`, `manual`.
 
 ```yaml
       - id: workflow-sync
 ```
 
-CI runs the same hook when the `lint` job sets `with: {workflow-sync: true}` (the go-lint and python-lint input). Rule catalogue, exemptions, limits and rollout: [docs/workflow-sync.md](docs/workflow-sync.md). Repo settings that CI cannot read: `GH_TOKEN= scripts/check-repo-settings.sh`.
+CI runs the same hook when the `lint` job sets `with: {workflow-sync: true}` (the go-lint and python-lint input), or calls `docs-lint.yml` (docs profile). Rule catalogue, exemptions, limits and rollout: [docs/workflow-sync.md](docs/workflow-sync.md). Repo settings that CI cannot read: `GH_TOKEN= scripts/check-repo-settings.sh`.
 
 ### Why it is centralised
 
@@ -834,7 +853,7 @@ A hook is not a substitute for a server-side rule — it runs only where it is i
 - `actionlint` parses every workflow file and shellchecks each `run:` block. Version pinned in `.actionlint-version`.
 - `zizmor` audits the same workflows for security anti-patterns actionlint doesn't check — unpinned action refs, credential persistence, template injection. Version pinned in `.zizmor-version`, mirroring `.actionlint-version`. Installed from zizmor's released binary rather than `uvx zizmor`, so the job needs no Python/uv toolchain — same reasoning as the actionlint install step.
 
-- `workflow-sync` runs `gofmt -l`, `go vet` and `go test ./...`. The tests include `internal/syncheck/governance_test.go`, which fails when the policy constants drift from `go-coverage.yml`, `go-lint.yml`, `python-lint.yml`, `python-vuln.yml`, `pr-title.yml`, `.osv-scanner-version`, `.pre-commit-hooks.yaml` or `templates/` (including `templates/python/`, which must pass the Python profile), and `python_workflows_test.go`, which fails when an inlined script block differs from `scripts/` or a Python workflow breaks a hard rule (SHA pins, `persist-credentials: false`, read-only token, inputs through `env:`, timeout, one job per workflow).
+- `workflow-sync` runs `gofmt -l`, `go vet` and `go test ./...`. The tests include `internal/syncheck/governance_test.go`, which fails when the policy constants drift from `go-coverage.yml`, `go-lint.yml`, `python-lint.yml`, `python-vuln.yml`, `pr-title.yml`, `.osv-scanner-version`, `.pre-commit-hooks.yaml` or `templates/` (including `templates/python/` and `templates/docs/`, which must pass the Python and docs profiles), and `python_workflows_test.go`, which fails when an inlined script block differs from `scripts/` or a Python workflow breaks a hard rule (SHA pins, `persist-credentials: false`, read-only token, inputs through `env:`, timeout, one job per workflow).
 - `python-scripts` runs the unit tests of `scripts/python_pins.py` and `scripts/python_coverage_floor.py` (`python3 -m unittest discover -s scripts/tests`).
 
 ### Action-pinning policy
