@@ -1,0 +1,50 @@
+# Canonical .pre-commit-config.yaml for a docs-only repo (workflow-sync docs
+# profile). Run `make setup` once after cloning.
+#
+# `pre-commit install` only writes the hook types listed here. Without this line it
+# writes .git/hooks/pre-commit alone, and the commit-msg stage never fires.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+# Hooks that declare no `stages` would otherwise also run at commit-msg and pre-push.
+default_stages: [pre-commit]
+
+repos:
+  # Pin rev to the immutable tag (hooks/vX.Y.Z), never the moving `hooks/v1`.
+  # The docs profile of workflow-sync needs the first hooks tag cut after it merged
+  # (hooks/v1.8.0 or later); earlier tags fail a docs repo with a `profile` violation.
+  # No go-vuln or py-vuln hook: vuln-target is not checked in this profile.
+  - repo: https://github.com/tclavelloux/promy-github-workflows
+    rev: hooks/v1.8.0
+    hooks:
+      - id: no-direct-commit-to-main
+      - id: workflow-sync
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      # The manifest declares pre-push on these hooks; default_stages does not override it.
+      - id: check-added-large-files
+        stages: [pre-commit]
+        args: [--maxkb=1024]
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args:
+          - feat
+          - fix
+          - docs
+          - style
+          - refactor
+          - perf
+          - test
+          - build
+          - ci
+          - chore
+          - revert
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.29.1
+    hooks:
+      - id: gitleaks

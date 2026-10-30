@@ -26,7 +26,7 @@
   stages: [pre-push, manual]
 - id: workflow-sync
   name: workflow-sync (fleet CI and hook governance)
-  description: Checks ci.yml, pr-title.yml, release-please.yml, dependabot.yml, .pre-commit-config.yaml, Makefile and pinned tool files against the fleet policy at this rev (Go or Python profile).
+  description: Checks ci.yml, pr-title.yml, release-please.yml, dependabot.yml, .pre-commit-config.yaml, Makefile and pinned tool files against the fleet policy at this rev (Go, Python or docs profile).
   entry: workflow-sync
   language: golang
   always_run: true

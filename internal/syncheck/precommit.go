@@ -128,10 +128,14 @@ func (c *checker) checkPreCommit() {
 	c.checkManifestStages(repos)
 	c.checkGovernanceRepo(repos)
 	c.checkRevs(repos)
-	c.checkCoverageHook(repos)
-	c.checkNoTestHook(root, repos)
+	if c.prof != docsProfile { // no code: no coverage gate, no test suite, no vuln scan
+		c.checkCoverageHook(repos)
+		c.checkNoTestHook(root, repos)
+	}
 	c.checkCommitMsgHook(repos)
-	c.checkVulnTarget(repos)
+	if c.prof != docsProfile {
+		c.checkVulnTarget(repos)
+	}
 }
 
 func (c *checker) checkInstallTypes(root *yaml.Node) {

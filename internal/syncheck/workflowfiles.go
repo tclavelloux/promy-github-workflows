@@ -61,6 +61,9 @@ func (c *checker) checkPRTitle() {
 
 func (c *checker) checkReleasePlease() {
 	p := c.loadYAML(releaseFile)
+	if !p.exists && c.prof == docsProfile {
+		return // a docs repo publishes no releases; the file is optional there
+	}
 	if !p.exists {
 		c.add(releaseFile, 0, ruleReleasePlease, "file missing; copy templates/release-please.yml, which calls %s", govRef("release-please"))
 		return
@@ -242,7 +245,11 @@ func (c *checker) checkDependabot() {
 			}
 		}
 	}
-	for _, eco := range []string{"gomod", "github-actions"} {
+	ecosystems := []string{"gomod", "github-actions"}
+	if c.prof == docsProfile {
+		ecosystems = []string{"github-actions"}
+	}
+	for _, eco := range ecosystems {
 		if !have[eco] {
 			c.add(dependabotYML, line(uk, 1), ruleDependabot, "no updates entry for package-ecosystem %q at directory \"/\"; add one", eco)
 		}
