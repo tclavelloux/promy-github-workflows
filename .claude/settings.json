@@ -1,0 +1,14 @@
+{
+  "extraKnownMarketplaces": {
+    "promy": {
+      "source": {
+        "source": "github",
+        "repo": "tclavelloux/promy-steering"
+      },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "promy@promy": true
+  }
+}
