@@ -28,13 +28,14 @@ case "$endpoint" in
   *)
     case "$4" in
       .allow_squash_merge) echo true ;;
+      .delete_branch_on_merge) echo "${FAKE_DELETE_BRANCH:-true}" ;;
       *) echo false ;;
     esac ;;
 esac
 """
 
 
-def run(args=(), listing="", list_status=0):
+def run(args=(), listing="", list_status=0, extra_env=None):
     with tempfile.TemporaryDirectory() as d:
         gh = os.path.join(d, "gh")
         with open(gh, "w", encoding="utf-8") as fh:
@@ -47,6 +48,7 @@ def run(args=(), listing="", list_status=0):
             FAKE_LIST=listing,
             FAKE_LIST_STATUS=str(list_status),
             FAKE_CALLS=calls,
+            **(extra_env or {}),
         )
         p = subprocess.run(
             ["bash", SCRIPT, *args], env=env, capture_output=True, text=True, check=False
@@ -72,6 +74,20 @@ class CheckRepoSettings(unittest.TestCase):
     def test_args_skip_listing_even_when_it_would_fail(self):
         code, _, _, _ = run(args=["tclavelloux/promy-x"], list_status=1)
         self.assertEqual(code, 0)
+
+    def test_delete_branch_on_merge_checked(self):
+        code, out, _, _ = run(args=["tclavelloux/promy-x"])
+        self.assertEqual(code, 0)
+        self.assertIn("ok   tclavelloux/promy-x delete_branch_on_merge (got true)", out)
+
+    def test_delete_branch_on_merge_off_fails(self):
+        code, out, _, _ = run(
+            args=["tclavelloux/promy-x"], extra_env={"FAKE_DELETE_BRANCH": "false"}
+        )
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "FAIL tclavelloux/promy-x delete_branch_on_merge (got false, want true)", out
+        )
 
     def test_empty_listing_exits_2(self):
         code, out, err, _ = run(listing="")

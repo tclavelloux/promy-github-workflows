@@ -173,6 +173,7 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
 - `scripts/check-repo-settings.sh` checks per repo. With no args it discovers the repos (`gh repo list tclavelloux --no-archived`, names matching `promy-*`, this repo included); explicit `owner/repo` args override the list. An empty or failed listing exits 2:
   - Actions default permissions `read`; Actions may NOT create or approve PRs (`can_approve_pull_request_reviews` is `false`). The App opens every fleet bot PR and `dependabot-automerge` only merges, which the setting does not gate.
   - Squash merge on, merge commit off, rebase off. The PR title is the commit release-please parses.
+  - Delete head branches on merge on (`delete_branch_on_merge`), so merged PR branches do not pile up on `origin`.
   - Vulnerability alerts enabled; automated security fixes enabled.
 - Output: `ok|FAIL <repo> <check> (got <value>)`. Exit 1 on any FAIL, 2 when `gh` errors or the discovered list is empty. `GH=<path>` swaps the binary for tests.
 
