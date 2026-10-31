@@ -101,6 +101,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | `make-setup` | `setup:` recipe is exactly `pre-commit install --install-hooks` | One bootstrap command |
 | `make-hookspath` | No `core.hooksPath` anywhere in the Makefile | pre-commit refuses to install while it is set |
 | `make-coverage-pin` | Not docs. Python: a `check-coverage:` target exists. Go: `install-go-test-coverage:` installs `github.com/vladopajic/go-test-coverage/v2@v2.21.0` (policy version); `check-coverage:` target exists | Local tool equals the CI action version |
+| `make-uv-pin` | Python only. A line `UV := uvx uv@$(shell cat .uv-version)` exists; no recipe line calls bare `uv` (use `$(UV) ...`; `uvx` and words containing `uv` are fine) | make uses the fleet uv whatever is on PATH; a different local uv rewrites `uv.lock` with another `revision` |
 
 ### Repo files
 
@@ -116,7 +117,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 
 | Rule | File | Invariant | Why |
 |---|---|---|---|
-| `uv-version` | `.uv-version` | Equals `UVVersion` (`0.12.18`), leading `v` ignored | The fleet's uv decision; python-lint ties the uv-pre-commit rev, `[tool.uv] required-version` floors and Dockerfile uv tags to this file |
+| `uv-version` | `.uv-version` | Equals `UVVersion` (`0.13.5`), leading `v` ignored | The fleet's uv decision; python-lint ties the uv-pre-commit rev, `[tool.uv] required-version` floors and Dockerfile uv tags to this file |
 | `ruff-version` | `.ruff-version`, `.pre-commit-config.yaml` | `.ruff-version` equals `RuffVersion` (`0.17.0`, the python-lint default); an `astral-sh/ruff-pre-commit` entry exists with `rev: v0.17.0` | Local ruff equals CI ruff. python-lint only warns on this drift; the pinned hook rev makes the bump deliberate |
 | `python-version` | `<project>/.python-version` | Exists in every uv project and starts with `X.Y` | uv, `requires-python` and `FROM python:X.Y` read it; python-lint compares them |
 | `poetry-lock` | any `poetry.lock` | None tracked | uv is the toolchain; a stale lock misleads Dependabot and scanners |

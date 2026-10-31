@@ -53,7 +53,13 @@ Tags: `dependabot-automerge/v1(.0.0, .1.0, .2.0)`, `go-vuln-fix/v1(.0.0)`, `hook
   - Tidy, build and the rescan run under `GOTOOLCHAIN=go<target>`; any claimed ID still called aborts the run and restores go.mod/go.sum.
   - `go-patch-bump: false` opts out.
 - Python vuln fix (`python-vuln-fix`):
-  - uv version: read from the caller's `.uv-version`, the pin `python-lint` enforces. Keep the pin equal to the uv version Dependabot writes locks with: measured 2026-10-22 on promy-market-catalog locks written by Dependabot's uv 0.12.18, a fix run with uv 0.11.13 rewrote 226 lines on `store` and 528 on `leaflet` (adds `marker = ...` to dependency entries), against 0 with uv 0.12.18. The locks stay valid and Dependabot rewrites them on its next PR, but the diff buries the real change.
+  - uv version: `.uv-version` is the single authority (the vuln-fix bot, CI, the uv-pre-commit hook, Dockerfiles and `make lock` read it). Its value tracks the uv Dependabot bundles (dependabot-core `uv/helpers/requirements.txt`, not configurable from `dependabot.yml`), because Dependabot is the only lock writer that cannot be pinned.
+    - uv >= 0.13.0 writes `revision = 5` in `uv.lock`; uv <= 0.12.x writes `revision = 3`. Any lock write rewrites it; a no-op `uv lock` keeps the file.
+    - Measured 2026-10-31 on promy-market-catalog: `uv lock --upgrade` with 0.12.18 and 0.13.5 differed only in that line. A downgrade loses nothing today, but every disagreeing writer flips it.
+    - Dependabot's uv moved 0.12.x -> 0.13.5 on 2026-10-22 (dependabot-core `afe6e86f`) and first rewrote a fleet lock in market-catalog #109.
+    - `[tool.uv] required-version = "==X"` is rejected: Dependabot's updater fails on it. Keep `>=` floors.
+    - `pin-drift` reports when the pin and Dependabot's bundled uv differ (a pin above it counts too).
+    - History: with uv 0.11.13 against Dependabot's 0.12.18, a fix run rewrote 226 lines on `store` and 528 on `leaflet` (adds `marker = ...` to dependency entries).
   - Dependabot overlap: keep the `uv-security` groups. They fix GHSA-backed advisories faster; this workflow fills the OSV-only gap. Branch namespaces differ (`dependabot/uv/...` vs `fix/py-vuln-*`), and a run that finds nothing to fix closes a bot-opened `fix/py-vuln-*` PR, so a bump Dependabot landed first leaves no stale PR.
   - CalVer: the first release segment rising is a major, except when both sides are >= 1000 (certifi `2024.2.2` -> `2026.10.19`, tzdata). Without it every certifi advisory would need a human.
   - Cascades: uv may move other packages when it resolves a bump. A cascade into an excluded or major-bumped package restores the lock and goes to the issue; other moves are kept and listed in the PR.

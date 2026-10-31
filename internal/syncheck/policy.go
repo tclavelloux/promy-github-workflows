@@ -11,11 +11,14 @@ const (
 
 	// Python tool versions. Ruff and osv-scanner are decided by the reusable
 	// workflows; uv by this file alone (python-lint reads the caller's .uv-version).
+	// UVVersion must equal the uv Dependabot bundles (dependabot-core
+	// uv/helpers/requirements.txt): it is the one lock writer that cannot be pinned,
+	// and pin-drift reports any difference.
 	// The Python profile requires .ruff-version, the ruff-pre-commit rev and
 	// .uv-version to equal these; python-lint ties every other pin to those files.
-	RuffVersion       = "0.17.0"  // python-lint.yml ruff-version default
-	OSVScannerVersion = "2.6.0"   // python-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln hook)
-	UVVersion         = "0.12.18" // fleet uv pin; templates/python/pre-commit-config.yaml uv-pre-commit rev
+	RuffVersion       = "0.17.0" // python-lint.yml ruff-version default
+	OSVScannerVersion = "2.6.0"  // python-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln hook)
+	UVVersion         = "0.13.5" // fleet uv pin; templates/python/pre-commit-config.yaml uv-pre-commit rev
 
 	// OSVIgnoreMaxDays bounds every osv-scanner ignore: Python has no
 	// reachability analysis, so an ignore must expire and be re-triaged.

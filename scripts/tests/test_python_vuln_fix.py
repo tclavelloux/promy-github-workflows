@@ -7,6 +7,7 @@ tests cover the decisions (gates, refusals, cascades, rescan), not the real tool
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -107,7 +108,7 @@ def adv(ident, fixed, **kw):
 class Workspace:
     """A temp repo with fake osv-scanner and uv; `run` drives the real script."""
 
-    def __init__(self, test, locks, osv=None, uv=None):
+    def __init__(self, test, locks, osv=None, uv=None, pin="0.12.18"):
         self.test = test
         self.tmp = tempfile.mkdtemp()
         test.addCleanup(shutil.rmtree, self.tmp, True)
@@ -119,6 +120,10 @@ class Workspace:
             os.makedirs(os.path.join(self.root, project), exist_ok=True)
             with open(os.path.join(self.root, project, "uv.lock"), "w") as f:
                 f.write(text)
+        if pin is not None:
+            os.makedirs(self.root, exist_ok=True)
+            with open(os.path.join(self.root, ".uv-version"), "w") as f:
+                f.write(pin + "\n")
         self.osv_bin = os.path.join(self.tmp, "osv-scanner")
         self.uv_bin = os.path.join(self.tmp, "uv")
         for path, body in ((self.osv_bin, FAKE_OSV), (self.uv_bin, FAKE_UV)):
@@ -134,9 +139,9 @@ class Workspace:
         with open(os.path.join(self.root, project, "uv.lock")) as f:
             return f.read()
 
-    def run(self, projects, exclude="", allow_major=None):
+    def run(self, projects, exclude="", allow_major=None, uv=None):
         cmd = [sys.executable, SCRIPT, "run", "--projects", json.dumps(projects), "--out", self.out, "--root", self.root,
-               "--osv-scanner", self.osv_bin, "--uv", self.uv_bin, "--exclude", exclude]
+               "--osv-scanner", self.osv_bin, "--uv", uv or self.uv_bin, "--exclude", exclude]
         if allow_major is not None:
             cmd += ["--allow-major", allow_major]
         env = dict(os.environ, FAKE_CFG=self.cfg, FAKE_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
@@ -501,6 +506,36 @@ class FixTest(unittest.TestCase):
         w = Workspace(self, {"store": STORE()}, osv={"store": [CERTIFI, None]})
         w.run(["store"])
         self.assertLessEqual(len(w.read("title.txt").strip()), 72)
+
+
+class UvPinTest(unittest.TestCase):
+    def test_mismatch_exits_2_before_any_scan(self):
+        w = Workspace(self, {"store": STORE()}, osv={"store": [CERTIFI, None]}, pin="0.13.5")
+        self.assertEqual(w.run(["store"]), 2)
+        self.assertIn(
+            '::error file=.uv-version::uv 0.12.18 does not match .uv-version 0.13.5; a different uv rewrites '
+            'the lock format. Rerun with --uv "uvx uv@0.13.5".', w.proc.stdout)
+        self.assertEqual(w.osv_calls(), [])
+        self.assertEqual(w.lock_calls(), [])
+        self.assertEqual(w.lock("store"), w.before["store"])
+
+    def test_leading_v_in_pin_is_ignored(self):
+        w = Workspace(self, {"store": STORE()}, osv={"store": [CERTIFI, None]}, pin="v0.12.18")
+        self.assertEqual(w.run(["store"]), 0)
+
+    def test_no_pin_file_means_no_check(self):
+        w = Workspace(self, {"store": STORE()}, osv={"store": [CERTIFI, None]}, pin=None)
+        self.assertEqual(w.run(["store"]), 0)
+
+    def test_command_string_is_split_with_shlex(self):
+        w = Workspace(self, {"store": STORE()}, osv={"store": [CERTIFI, None]})
+        self.assertEqual(w.run(["store"], uv=f"{shlex.quote(sys.executable)} {shlex.quote(w.uv_bin)}"), 0)
+        self.assertTrue(w.lock_calls())
+        self.assertEqual(w.lock_calls()[0]["args"][0], "lock")
+
+    def test_bad_command_string_exits_2(self):
+        w = Workspace(self, {"store": STORE()})
+        self.assertEqual(w.run(["store"], uv="'unterminated"), 2)
 
 
 class InputTest(unittest.TestCase):

@@ -1,5 +1,6 @@
 """Offline tests for scripts/pin_drift.py (fake fetcher, temp checkout)."""
 
+import base64
 import contextlib
 import datetime
 import io
@@ -13,10 +14,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pin_drift as pd  # noqa: E402
 
 
-def make_fetch(releases=None, tags=None, fail=()):
-    """releases: repo -> tag_name; tags: repo -> list of full ref names."""
+def make_fetch(releases=None, tags=None, fail=(), files=None):
+    """releases: repo -> tag_name; tags: repo -> list of full ref names;
+    files: (repo, path) -> text served by the contents API (optional ?ref=)."""
     releases = releases or {}
     tags = tags or {}
+    files = files or {}
 
     def fetch(path):
         for repo in fail:
@@ -30,6 +33,9 @@ def make_fetch(releases=None, tags=None, fail=()):
                 if "?" in path:
                     raise OSError(f"matching-refs takes no query string: {path}")
                 return [{"ref": r} for r in refs]
+        for (repo, fpath), text in files.items():
+            if path.split("?")[0] == f"/repos/{repo}/contents/{fpath}":
+                return {"content": base64.encodebytes(text.encode()).decode(), "encoding": "base64"}
         raise OSError(f"unexpected path {path}")
 
     return fetch
@@ -125,6 +131,41 @@ class LatestTests(unittest.TestCase):
             pd.latest_version(up, make_fetch(tags={"o/r": ["refs/tags/v1.0.0-rc1"]}))
 
 
+REQ = "# pinned\nuv==0.13.5\nother==1.0\n"
+FILE_UP = {"repo": "d/c", "kind": "file", "path": "uv/requirements.txt", "pattern": r"^uv==(\S+)$"}
+
+
+class FileKindTests(unittest.TestCase):
+    def latest(self, text, **extra):
+        return pd.latest_version({**FILE_UP, **extra}, make_fetch(files={("d/c", "uv/requirements.txt"): text}))
+
+    def test_file_match(self):
+        self.assertEqual(self.latest(REQ), "0.13.5")
+
+    def test_file_strips_v(self):
+        self.assertEqual(self.latest("uv==v0.13.5\n"), "0.13.5")
+
+    def test_file_ref_adds_query(self):
+        seen = []
+
+        def fetch(path):
+            seen.append(path)
+            return {"content": base64.b64encode(b"uv==1.0.0\n").decode()}
+
+        pd.latest_version({**FILE_UP, "ref": "main"}, fetch)
+        self.assertEqual(seen, ["/repos/d/c/contents/uv/requirements.txt?ref=main"])
+
+    def test_file_no_match_and_two_matches_raise(self):
+        with self.assertRaisesRegex(ValueError, "0 times"):
+            self.latest("other==1\n")
+        with self.assertRaisesRegex(ValueError, "2 times"):
+            self.latest("uv==0.13.5\nuv==0.13.6\n")
+
+    def test_file_not_a_version_raises(self):
+        with self.assertRaisesRegex(ValueError, "plain version"):
+            self.latest("uv==0.13.5rc1\n")
+
+
 class ScanTests(unittest.TestCase):
     def setUp(self):
         self.co = Checkout({"a": "1.0.0\n", "b": "1.9.0\n", "c": "2.0.0\n"})
@@ -145,6 +186,40 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(got["current"]["status"], "current")
         self.assertEqual(got["unknown"]["status"], "unknown")
         self.assertIn("network down", got["unknown"]["error"])
+
+    def scan_file(self, up_text, loc, **extra):
+        p = {"name": "uv", "locations": [loc],
+             "upstream": {**FILE_UP, **extra}}
+        fetch = make_fetch(files={("d/c", "uv/requirements.txt"): up_text})
+        (r,) = self.scan([p], fetch)
+        return r
+
+    def test_file_no_match_is_unknown(self):
+        r = self.scan_file("nothing\n", {"file": "c"})
+        self.assertEqual(r["status"], "unknown")
+
+    def test_file_two_matches_is_unknown(self):
+        r = self.scan_file("uv==1.0.0\nuv==1.0.1\n", {"file": "c"})
+        self.assertEqual(r["status"], "unknown")
+
+    def test_exact_ahead_counts_as_drift(self):
+        r = self.scan_file("uv==1.0.0\n", {"file": "c"}, exact=True)  # current 2.0.0
+        self.assertEqual(r["status"], "ahead")
+        report, drifted, unknown = pd.render([r], datetime.date(2026, 1, 1))
+        self.assertEqual((drifted, unknown), (1, 0))
+        self.assertIn("ahead", report)
+
+    def test_exact_equal_is_current(self):
+        r = self.scan_file("uv==2.0.0\n", {"file": "c"}, exact=True)
+        self.assertEqual(r["status"], "current")
+
+    def test_exact_behind_is_behind(self):
+        r = self.scan_file("uv==3.0.0\n", {"file": "c"}, exact=True)
+        self.assertEqual(r["status"], "behind")
+
+    def test_non_exact_ahead_is_current(self):
+        r = self.scan_file("uv==1.0.0\n", {"file": "c"})
+        self.assertEqual(r["status"], "current")
 
     def test_disagreeing_locations_use_minimum(self):
         pins = [pin("multi", [{"file": "b"}, {"file": "a"}], repo="x/m")]

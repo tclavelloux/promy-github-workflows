@@ -3,8 +3,11 @@
     {
       "name": "uv",
       "upstream": {
-        "repo": "astral-sh/uv",
-        "kind": "release"
+        "repo": "dependabot/dependabot-core",
+        "kind": "file",
+        "path": "uv/helpers/requirements.txt",
+        "pattern": "^uv==(\\S+)$",
+        "exact": true
       },
       "locations": [
         {
@@ -161,8 +164,11 @@
     {
       "name": "uv-pre-commit (python template)",
       "upstream": {
-        "repo": "astral-sh/uv-pre-commit",
-        "kind": "release"
+        "repo": "dependabot/dependabot-core",
+        "kind": "file",
+        "path": "uv/helpers/requirements.txt",
+        "pattern": "^uv==(\\S+)$",
+        "exact": true
       },
       "locations": [
         {

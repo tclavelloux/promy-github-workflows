@@ -8,10 +8,12 @@ keeps the manifest complete and resolvable.
 
 Usage: scripts/pin_drift.py --manifest pin-manifest.json --out report.md [--root DIR]
 Writes behind=N and unknown=M to $GITHUB_OUTPUT when set, and prints them.
+behind counts pins behind upstream plus, for upstreams marked "exact", pins ahead of it.
 Exit: 0 scan ran (pins may be behind), 2 manifest error (a location does not resolve).
 """
 
 import argparse
+import base64
 import datetime
 import json
 import os
@@ -131,6 +133,30 @@ def latest_version(upstream, fetch):
         if best is None:
             raise ValueError(f"{repo}: no tag matching {prefix}X.Y.Z")
         return best[1]
+    if kind == "file":
+        path = upstream["path"]
+        query = f"?ref={upstream['ref']}" if upstream.get("ref") else ""
+        data = fetch(f"/repos/{repo}/contents/{path}{query}")
+        content = data.get("content") if isinstance(data, dict) else None
+        if not isinstance(content, str):
+            raise ValueError(f"{repo}: {path} has no inline content")
+        try:
+            text = base64.b64decode(content).decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ValueError(f"{repo}: {path} content is not base64 text: {exc}") from exc
+        try:
+            rx = re.compile(upstream["pattern"], re.MULTILINE)
+        except re.error as exc:
+            raise ValueError(f"{repo}: bad pattern for {path}: {exc}") from exc
+        if rx.groups != 1:
+            raise ValueError(f"{repo}: pattern for {path} must have exactly one capture group")
+        found = rx.findall(text)
+        if len(found) != 1:
+            raise ValueError(f"{repo}: pattern matched {len(found)} times in {path}, want exactly 1")
+        version = strip_v(found[0].strip())
+        if semver(version) is None:
+            raise ValueError(f"{repo}: {path} value {version!r} is not a plain version")
+        return version
     raise ManifestError(f"unknown upstream kind {kind!r}")
 
 
@@ -151,7 +177,12 @@ def scan(manifest, root, fetch):
                "disagree": len({v for _, v in values}) > 1, "latest": None, "error": None}
         try:
             res["latest"] = latest_version(pin["upstream"], fetch)
-            res["status"] = "behind" if semver(res["latest"]) > semver(current) else "current"
+            if semver(res["latest"]) > semver(current):
+                res["status"] = "behind"
+            elif pin["upstream"].get("exact") and semver(res["latest"]) < semver(current):
+                res["status"] = "ahead"
+            else:
+                res["status"] = "current"
         except ManifestError:
             raise
         except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
@@ -166,11 +197,11 @@ def cell(text):
 
 
 def render(results, today):
-    behind = sum(r["status"] == "behind" for r in results)
+    behind = sum(r["status"] in ("behind", "ahead") for r in results)
     unknown = sum(r["status"] == "unknown" for r in results)
     lines = [
         MARKER,
-        f"{behind} pin(s) behind upstream, {unknown} unknown. Scanned {today.isoformat()}. "
+        f"{behind} pin(s) behind or ahead of upstream, {unknown} unknown. Scanned {today.isoformat()}. "
         f"Bump procedures: [docs/pin-bumps.md]({DOCS_URL}).",
         "",
         "| Pin | Current | Latest | Status | Locations |",

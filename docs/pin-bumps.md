@@ -19,6 +19,8 @@
 ```
 
 - `upstream.kind: release`: `GET /repos/{repo}/releases/latest`, `.tag_name`.
+- `upstream.kind: file`: `GET /repos/{repo}/contents/{path}` (`?ref=` when `ref` is set), base64-decoded; `pattern` (one capture group, multiline) must match exactly once and capture a plain version. Fields: `repo`, `path`, `pattern`, optional `ref`. Used for uv: `dependabot/dependabot-core`, `uv/helpers/requirements.txt`, `^uv==(\S+)$`.
+- `upstream.exact: true` (optional): the pin must equal upstream. A current value above upstream is status `ahead` and counts in `behind=` and the issue like `behind`. Without it, ahead is `current`.
 - `upstream.kind: tag`: highest plain `X.Y.Z` tag under `prefix` (no prereleases, numeric order). Use it when the project publishes no GitHub releases (govulncheck: `golang/vuln`, prefix `v`; hooks rev: prefix `hooks/v`).
 - Location `{file}`: the whole file, trimmed, is the version.
 - Location `{file, const}`: Go constant `NAME = "x"` in that file.
@@ -36,9 +38,10 @@ Add a pin:
 
 uv (one PR in governance, one per consumer):
 
+0. Trigger: pin-drift reports uv differs from Dependabot's bundled uv (behind or ahead). Target the uv in `dependabot-core` `uv/helpers/requirements.txt`, not the latest astral release.
 1. Governance: `policy.go` `UVVersion`, the uv-pre-commit `rev` in `templates/python/pre-commit-config.yaml`, README pin text, `docs/workflow-sync.md`, pin tests. Release a new `hooks/vX.Y.Z` tag if the hook changed.
-2. Consumer, one PR: `.uv-version`; uv-pre-commit `rev:`; every `COPY --from=ghcr.io/astral-sh/uv:X` in Dockerfiles; `required-version` floors that must rise; `uv lock` per project (`uv lock --project <dir>`).
-3. Keep the pin equal to the uv Dependabot writes locks with: a mismatch rewrote 226 of 528 lines of a lock (`docs/dependency-automation.md`).
+2. Consumer, one PR: `.uv-version`; uv-pre-commit `rev:`; every `COPY --from=ghcr.io/astral-sh/uv:X` in Dockerfiles; `required-version` floors that must rise; `make lock` (or `uvx uv@$(cat .uv-version) lock --project <dir>` per project), never bare `uv lock`: a different local uv writes another lock `revision`.
+3. The pin equals the uv Dependabot bundles: it is the one lock writer that cannot be pinned, and a disagreeing writer flips the lock `revision` (uv >= 0.13.0: 5, <= 0.12.x: 3; measurements in `docs/dependency-automation.md`).
 4. Leave Dependabot's `ignore: ghcr.io/astral-sh/uv`; `workflow-sync` enforces it. `python-vuln-fix` reads `.uv-version`, so nothing else changes.
 
 ruff:
