@@ -7,9 +7,12 @@ between the `python-vuln-fix body` markers must stay byte-identical in both
 fake osv-scanner and uv executables, so no network is needed.
 
 Usage: scripts/python_vuln_fix.py run --projects JSON --out DIR [--osv-scanner BIN]
-       [--uv BIN] [--exclude TEXT] [--allow-major true|false] [--root DIR]
-Exit codes: 0 completed (fixed or not), 2 usage or scanner error, 4 uv error that is
-not a resolver refusal.
+       [--uv CMD] [--exclude TEXT] [--allow-major true|false] [--root DIR]
+--uv is a command split with shlex, e.g. --uv "uvx uv@0.13.5". When <root>/.uv-version
+exists, `<uv> --version` must report that version, else exit 2 (a different uv rewrites
+the lock format).
+Exit codes: 0 completed (fixed or not), 2 usage, scanner or uv-pin error, 4 uv error
+that is not a resolver refusal.
 """
 
 # >>> python-vuln-fix body
@@ -23,6 +26,7 @@ import json
 import os
 import posixpath
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -315,7 +319,7 @@ def scan(ctx, project, lock_rel):
 def run_uv(ctx, project_dir, args):
     env = dict(os.environ, NO_COLOR="1")
     try:
-        return subprocess.run([ctx.uv] + args, cwd=project_dir, capture_output=True, text=True, env=env)
+        return subprocess.run(ctx.uv + args, cwd=project_dir, capture_output=True, text=True, env=env)
     except OSError as e:
         raise UsageError(f"cannot run uv: {e.strerror}")
 
@@ -459,10 +463,27 @@ def link(i):
 
 def uv_version(ctx):
     try:
-        proc = subprocess.run([ctx.uv, "--version"], capture_output=True, text=True)
+        proc = subprocess.run(ctx.uv + ["--version"], capture_output=True, text=True)
         return clean_text(proc.stdout.strip().splitlines()[0], 100) if proc.returncode == 0 and proc.stdout.strip() else "unknown"
     except OSError:
         return "unknown"
+
+
+def check_uv_pin(ctx):
+    """None when <root>/.uv-version is absent or matches `<uv> --version`, else the ::error line."""
+    try:
+        with open(os.path.join(ctx.root, ".uv-version"), encoding="utf-8") as f:
+            want = f.read().strip().splitlines()[0].strip().lstrip("v")
+    except (OSError, IndexError):
+        return None
+    if not want:
+        return None
+    m = re.match(r"^uv (\S+)", uv_version(ctx))
+    got = m.group(1) if m else "unknown"
+    if got == want:
+        return None
+    return (f"::error file=.uv-version::uv {got} does not match .uv-version {want}; a different uv rewrites "
+            f'the lock format. Rerun with --uv "uvx uv@{want}".')
 
 
 def write_outputs(ctx, results, out):
@@ -549,7 +570,18 @@ def cmd_run(args):
     def binary(x):
         return os.path.abspath(x) if os.sep in x else (shutil.which(x) or x)
 
-    ctx = Ctx(root, binary(args.osv_scanner), binary(args.uv), excludes, args.allow_major == "true")
+    try:
+        uv_cmd = shlex.split(args.uv)
+    except ValueError as e:
+        raise UsageError(f"--uv is not a valid command: {e}")
+    if not uv_cmd:
+        raise UsageError("--uv is empty")
+    uv_cmd[0] = binary(uv_cmd[0])
+    ctx = Ctx(root, binary(args.osv_scanner), uv_cmd, excludes, args.allow_major == "true")
+    mismatch = check_uv_pin(ctx)
+    if mismatch:
+        print(mismatch)
+        return 2
     out = os.path.abspath(args.out)
     os.makedirs(out, exist_ok=True)
     results = []

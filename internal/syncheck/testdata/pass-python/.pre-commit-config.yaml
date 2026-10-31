@@ -52,7 +52,7 @@ repos:
 
   # rev must equal .uv-version: the hook installs uv at this version (python-lint checks it).
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.12.18
+    rev: 0.13.5
     hooks:
       - id: uv-lock
         alias: uv-lock-app

@@ -196,7 +196,7 @@ func TestPythonDrift(t *testing.T) {
 		{name: "github-actions dropped", edits: []edit{ed(depRel, "package-ecosystem: github-actions", "package-ecosystem: gitsubmodule")}, rules: []string{"dependabot"}, msg: `"github-actions"`},
 		{name: "dependabot.yml missing", do: rm(depRel), rules: []string{"dependabot"}, msg: "templates/python/dependabot.yml"},
 		// repo files
-		{name: "uv-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".uv-version", "0.12.17\n") }, rules: []string{"uv-version"}, msg: "want 0.12.18"},
+		{name: "uv-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".uv-version", "0.12.17\n") }, rules: []string{"uv-version"}, msg: "want 0.13.5"},
 		{name: "uv-version missing", do: rm(".uv-version"), rules: []string{"uv-version"}, msg: "file missing"},
 		{name: "ruff-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".ruff-version", "0.16.0\n") }, rules: []string{"ruff-version"}, msg: "want 0.17.0"},
 		{name: "ruff hook rev drift", edits: []edit{ed(pcRel, "rev: v0.17.0", "rev: v0.16.0")}, rules: []string{"ruff-version"}, msg: `rev "v0.16.0"; want v0.17.0`},
@@ -243,6 +243,10 @@ func TestPythonDrift(t *testing.T) {
 		}, rules: []string{"precommit-no-test-hook"}, msg: "uv run pytest"},
 		{name: "check-coverage without always_run", edits: []edit{ed(pcRel, "        always_run: true\n", "")}, rules: []string{"precommit-coverage-hook"}, msg: "no .py files"},
 		{name: "check-coverage target missing", edits: []edit{ed(mkRel, "check-coverage:\n", "coverage:\n")}, rules: []string{"make-coverage-pin"}, msg: "no `check-coverage` target"},
+		{name: "UV variable missing", edits: []edit{ed(mkRel, "UV := uvx uv@$(shell cat .uv-version)\n", "")}, rules: []string{"make-uv-pin"}, msg: "no `UV := uvx uv@$(shell cat .uv-version)` line"},
+		{name: "UV variable not from .uv-version", edits: []edit{ed(mkRel, "uv@$(shell cat .uv-version)", "uv@0.13.5")}, rules: []string{"make-uv-pin"}, msg: "no `UV := uvx uv@$(shell cat .uv-version)` line"},
+		{name: "bare uv run in check-coverage", edits: []edit{ed(mkRel, "cd src/app && $(UV) run --frozen", "cd src/app && uv run --frozen")}, rules: []string{"make-uv-pin"}, msg: `target "check-coverage": recipe calls bare ` + "`uv`"},
+		{name: "bare uv lock in lock target", edits: []edit{ed(mkRel, "\t$(UV) lock --project src/worker", "\tuv lock --project src/worker")}, rules: []string{"make-uv-pin"}, msg: `target "lock"`},
 		{name: "workflow-sync hook missing", edits: []edit{ed(pcRel, "      - id: workflow-sync\n", "")}, rules: []string{"precommit-governance-repo"}, msg: "workflow-sync"},
 		// Go-only rules stay silent in a Python repo.
 		{name: "no golangci or testcoverage files needed", do: func(t *testing.T, r string) {

@@ -545,7 +545,7 @@ Behaviour:
 - A new PR closes older open `fix/py-vuln-*` PRs by `github-actions[bot]` or the App as superseded. A run that finds nothing to fix (Dependabot or a human landed it first) closes open `fix/py-vuln-*` PRs opened by a bot as stale, only when the scan completed and nothing aborted.
 - The commit goes through GraphQL `createCommitOnBranch` (GitHub-signed, no credentials on disk), one commit with every changed lock.
 - Never merges, never enables auto-merge itself. A caller's automerge job (`dependabot-automerge/v1.2.0`+) merges the App-opened fix PR once the diff is verified as patch-level and CI is green; a PR opened with `GITHUB_TOKEN` runs no CI and never reaches it.
-- uv version: read from the caller's `.uv-version` (same validation as `python-lint.yml`). A lock last written by a newer uv gets that uv's lock style when a resolution runs: keep the fleet pin at the version Dependabot uses.
+- uv version: read from the caller's `.uv-version` (same validation as `python-lint.yml`); keep it equal to the uv Dependabot bundles, since uv >= 0.13.0 writes lock `revision = 5` and <= 0.12.x writes `3` on every lock write. `scripts/python_vuln_fix.py` exits 2 when its `--uv` differs from `.uv-version`.
 - With `APP_CLIENT_ID` and `APP_PRIVATE_KEY`, the PR and commit are authored by the App, so **CI runs on the PR**. Without them the PR is opened with `GITHUB_TOKEN`, **CI does not run on it** and the PR body says so. Close and reopen the PR before merging. A failed token mint fails the run. The issue always uses `GITHUB_TOKEN`.
 - The fix logic is inlined in the workflow; `scripts/python_vuln_fix.py` is its locally testable twin, and the Go tests keep the two blocks byte-identical. Exit codes: 0 completed, 2 usage or scanner error, 4 uv error that is not a refusal.
 
@@ -621,7 +621,7 @@ Shared contract:
 
 - `ci.yml`: jobs `lint`, `typecheck`, `vuln`, `test`, `gitleaks`, plus `docker` iff a project has a `Dockerfile`, each calling its `python-*/v1` workflow with no `permissions:`; every job's `projects` lists exactly the uv projects (`ci-projects`).
 - `dependabot.yml`: `github-actions`, `uv` for every project, `docker` for every project with a `Dockerfile` (ignoring `ghcr.io/astral-sh/uv`).
-- Pins: `.uv-version` = `0.12.18`, `.ruff-version` and the `ruff-pre-commit` rev = `0.17.0`; `.python-version` per project; no `poetry.lock`.
+- Pins: `.uv-version` = `0.13.5` (the uv Dependabot bundles), `.ruff-version` and the `ruff-pre-commit` rev = `0.17.0`; `.python-version` per project; no `poetry.lock`.
 - Every osv-scanner ignore has a reason and expires within 90 days; every tested project has `fail_under` in (0, 100].
 - Shared with Go: trigger, concurrency, permissions, draft skip, SHA pins, `pr-title.yml`, `release-please.yml`, the pre-commit and Makefile rules (`check-coverage` hook running `make check-coverage`).
 
@@ -650,7 +650,7 @@ Drift rules:
 - A `.ruff-version` that differs from the `ruff-version` input is a warning, never a failure, like `.golangci-version` in `go-lint`.
 - Logic: `scripts/python_pins.py`, inlined into the workflow; unit tests with a failing fixture per mismatch class in `scripts/tests/`.
 
-Bump uv in one PR that edits every place: `.uv-version`, the `uv-pre-commit` `rev:`, every `COPY --from=ghcr.io/astral-sh/uv:X`, the floors in every `pyproject.toml` that must rise, then `uv lock` per project. The caller's `dependabot.yml` ignores the `ghcr.io/astral-sh/uv` image, so uv bumps stay deliberate. Bump ruff the same way: `.ruff-version`, the `ruff-pre-commit` `rev:`, `ruff.toml` floor.
+Bump uv in one PR that edits every place: `.uv-version`, the `uv-pre-commit` `rev:`, every `COPY --from=ghcr.io/astral-sh/uv:X`, the floors in every `pyproject.toml` that must rise, then `make lock` per repo (`uvx uv@$(cat .uv-version) lock --project <dir>` without the target). The pin follows the uv Dependabot bundles; `pin-drift` reports a difference. The caller's `dependabot.yml` ignores the `ghcr.io/astral-sh/uv` image, so uv bumps stay deliberate. Bump ruff the same way: `.ruff-version`, the `ruff-pre-commit` `rev:`, `ruff.toml` floor.
 
 | Input | Default | Purpose |
 |---|---|---|

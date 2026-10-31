@@ -9,9 +9,10 @@ const (
 	ruleMakeSetup       = "make-setup"
 	ruleMakeHooksPath   = "make-hookspath"
 	ruleMakeCoveragePin = "make-coverage-pin"
+	ruleMakeUVPin       = "make-uv-pin"
 )
 
-var _ = register(ruleMakeSetup, ruleMakeHooksPath, ruleMakeCoveragePin)
+var _ = register(ruleMakeSetup, ruleMakeHooksPath, ruleMakeCoveragePin, ruleMakeUVPin)
 
 type recipeLine struct {
 	text string // without the leading tab
@@ -120,6 +121,7 @@ func (c *checker) checkMakefile() {
 		if mk.targets["check-coverage"] == nil {
 			c.add(MakefileRel, 0, ruleMakeCoveragePin, "no `check-coverage` target; the pre-push coverage hook runs `make check-coverage` (pytest --cov per tested project)")
 		}
+		c.checkMakeUVPin(mk)
 	}
 
 	for _, name := range sortedKeys(mk.targets) {
@@ -127,6 +129,36 @@ func (c *checker) checkMakefile() {
 			if strings.Contains(r.text, "@latest") || strings.Contains(r.text, "releases/latest") {
 				c.add(MakefileRel, r.line, ruleUnpinnedTool,
 					"target %q: recipe uses a floating version (%q); pin an exact version", name, strings.TrimSpace(r.text))
+			}
+		}
+	}
+}
+
+var (
+	uvVarRe     = regexp.MustCompile(`^UV\s*:?=\s*uvx uv@\$\(shell cat \.uv-version\)\s*$`)
+	bareUVRe    = regexp.MustCompile(`(^|[\s;&|(])uv(\s|$)`)
+	uvVarUseRe  = regexp.MustCompile(`\$\(UV\)`)
+	uvFixedHint = "run uv as `$(UV) ...` so make uses the fleet pin whatever uv is on PATH"
+)
+
+// checkMakeUVPin: the Python Makefile defines UV from .uv-version and never calls bare uv.
+func (c *checker) checkMakeUVPin(mk *makefile) {
+	declared := false
+	for _, l := range mk.lines {
+		if uvVarRe.MatchString(l) {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		c.add(MakefileRel, 0, ruleMakeUVPin,
+			"no `UV := uvx uv@$(shell cat .uv-version)` line; add it at the top and %s", uvFixedHint)
+	}
+	for _, name := range sortedKeys(mk.targets) {
+		for _, r := range mk.targets[name].recipe {
+			if bareUVRe.MatchString(uvVarUseRe.ReplaceAllString(r.text, "")) {
+				c.add(MakefileRel, r.line, ruleMakeUVPin,
+					"target %q: recipe calls bare `uv` (%q); %s", name, strings.TrimSpace(r.text), uvFixedHint)
 			}
 		}
 	}
