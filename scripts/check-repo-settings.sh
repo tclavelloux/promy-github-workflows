@@ -68,6 +68,10 @@ for repo in "${REPOS[@]}"; do
   check "$repo" allow_merge_commit false "repos/$repo" .allow_merge_commit
   check "$repo" allow_rebase_merge false "repos/$repo" .allow_rebase_merge
 
+  # Merged PR branches are deleted by GitHub, so origin and local worktrees do
+  # not accumulate stale heads.
+  check "$repo" delete_branch_on_merge true "repos/$repo" .delete_branch_on_merge
+
   # 204 when alerts are on, 404 when off: a non-zero exit is the answer here,
   # not an error.
   if "$GH" api "repos/$repo/vulnerability-alerts" >/dev/null 2>&1; then
