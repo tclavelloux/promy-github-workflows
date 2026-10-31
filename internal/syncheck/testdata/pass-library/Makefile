@@ -30,7 +30,7 @@ coverage:
 # Pinned to the version promy-github-workflows' go-coverage.yml runs in CI; bump both together.
 .PHONY: install-go-test-coverage
 install-go-test-coverage:
-	go install github.com/vladopajic/go-test-coverage/v2@v2.20.1
+	go install github.com/vladopajic/go-test-coverage/v2@v2.21.0
 
 .PHONY: check-coverage
 check-coverage: install-go-test-coverage
