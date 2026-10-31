@@ -9,8 +9,6 @@ default_stages: [pre-commit]
 
 repos:
   # Pin rev to the immutable tag (hooks/vX.Y.Z), never the moving `hooks/v1`.
-  # The docs profile of workflow-sync needs the first hooks tag cut after it merged
-  # (hooks/v1.8.0 or later); earlier tags fail a docs repo with a `profile` violation.
   # No go-vuln or py-vuln hook: vuln-target is not checked in this profile.
   - repo: https://github.com/tclavelloux/promy-github-workflows
     rev: hooks/v1.8.0

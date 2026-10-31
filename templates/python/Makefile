@@ -20,7 +20,7 @@ lock:
 	$(UV) lock --project src/app
 	$(UV) lock --project src/worker
 
-# Requires the `py-vuln` hook in .pre-commit-config.yaml (rev hooks/v1.4.0 or later).
+# Requires the `py-vuln` hook in .pre-commit-config.yaml.
 # Same pinned osv-scanner and config lookup as CI's `vuln` job; blocks on any advisory.
 vuln:
 	pre-commit run py-vuln --hook-stage manual

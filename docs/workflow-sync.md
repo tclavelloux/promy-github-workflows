@@ -188,110 +188,38 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
    - `templates/` (automerge job, vuln-fix callers for both profiles, `release-please.yml` over both the Go and Python fixtures, `Makefile.vuln.mk`, `pre-commit-go-vuln.yaml`, `dependabot.yml`) pass the rules.
    - `templates/python/` (ci.yml, dependabot.yml, pre-commit-config.yaml, Makefile) pass the Python profile over `testdata/pass-python`; its uv-pre-commit rev equals `UVVersion`, its ruff rev equals `RuffVersion`.
    - `.osv-scanner-version` (read by the `py-vuln` hook) equals `OSVScannerVersion` (the `python-vuln.yml` default).
-4. Merge, then cut a new immutable `hooks/vX.Y.Z`. Never move an existing `hooks/v*` tag.
-5. Callers bump `rev:` (`pre-commit autoupdate` or by hand). Until they do, they run the old policy. For a workflow-side change, also move the matching `go-lint/v1`.
+4. Merge, then tag and roll out: [Roll out a policy change](#roll-out-a-policy-change).
+5. Callers bump `rev:` (`pre-commit autoupdate` or by hand). Until they do, they run the old policy.
 
-## Rollout of hooks/v1.2.0
+## Roll out a policy change
 
-Governance repo, once:
+Governance repo, after merge (signed tags on the merge commit):
 
-1. Merge the PR adding `workflow-sync`.
-2. Cut signed tags on the merge commit:
-   - `hooks/v1.2.0` (new, immutable; never move `hooks/v1.0.0` or `hooks/v1.1.0`)
-   - `go-lint/v1.2.0`, then move `go-lint/v1` to it
-   ```bash
-   git tag -s hooks/v1.2.0 -m hooks/v1.2.0 <sha>
-   git tag -s go-lint/v1.2.0 -m go-lint/v1.2.0 <sha>
-   git tag -sf go-lint/v1 -m go-lint/v1 <sha>
-   git push origin hooks/v1.2.0 go-lint/v1.2.0
-   git push --force origin go-lint/v1
-   ```
-
-Per repo, one PR, combined with the pending dependency-automation rollout ([dependency-automation.md](dependency-automation.md)); skip `hooks/v1.1.0` as a caller rev:
-
-`.pre-commit-config.yaml`:
-
-```yaml
-  - repo: https://github.com/tclavelloux/promy-github-workflows
-    rev: hooks/v1.2.0
-    hooks:
-      - id: no-direct-commit-to-main
-      - id: go-vuln
-      - id: workflow-sync
+```bash
+git tag -s hooks/vX.Y.Z -m hooks/vX.Y.Z <sha>          # new; never move an existing hooks/v*
+git tag -s <workflow>/vX.Y.Z -m <workflow>/vX.Y.Z <sha> # only if a workflow changed
+git tag -sf <workflow>/v1 -m <workflow>/v1 <sha>
+git push origin hooks/vX.Y.Z <workflow>/vX.Y.Z
+git push --force origin <workflow>/v1
 ```
 
-`.github/workflows/ci.yml`, `lint` job:
+- A new reusable workflow needs its tags before any caller merges.
+- When the new policy rejects the old caller files and the old policy rejects the new ones, ship the `rev:` bump and the file changes in one PR per repo.
+- Consumer PR order: promy-event-bus first (library), then the services.
 
-```yaml
-  lint:
-    if: github.event.pull_request.draft == false
-    uses: tclavelloux/promy-github-workflows/.github/workflows/go-lint.yml@go-lint/v1
-    with:
-      workflow-sync: true
-```
+## Onboard a caller
 
-Order:
-
-1. promy-event-bus. Fix `registry.yaml` in the same PR: SHA-pin `actions/checkout` with `# vX.Y.Z`, add `persist-credentials: false`, add top-level `permissions: {contents: read}`, pin `yq` to an exact release and verify its sha256 instead of `releases/latest`.
-2. promy-template-go
-3. promy-identifier
-4. promy-crm
-5. promy-product
-6. promy-user
+- Before wiring, list the drift: `go run github.com/tclavelloux/promy-github-workflows/cmd/workflow-sync@<sha> --root .`.
+- `.pre-commit-config.yaml`: governance entry at the latest `hooks/vX.Y.Z` with `no-direct-commit-to-main`, `workflow-sync` and `go-vuln` / `py-vuln` (then the `vuln:` target; `vuln-target` requires both or neither).
+- `ci.yml`: `with: {workflow-sync: true}` on the `lint` job (Go, Python), or a `lint` job calling `docs-lint.yml` (docs).
+- Docs profile: `.workflow-sync-profile` holding `docs`, `templates/docs/{ci.yml, pre-commit-config.yaml, dependabot.yml, Makefile}`, a `pr-title.yml` calling `pr-title/v1`; add `lint / lint` and `gitleaks` to the `protect-main` required checks.
 
 Deliberate-failure checks (a green check proves nothing):
 
-- Local: in each repo, drift the working copy (drop `persist-credentials: false`, or remove `- id: workflow-sync`) and run `pre-commit run workflow-sync --all-files`. Expect exit 1 and the rule id. Revert.
-- CI: on promy-event-bus, push the wiring commit before the `registry.yaml` fix. Expect `lint` red with `sha-pin`, `persist-credentials`, `workflow-permissions` and `unpinned-tool` annotations. Then push the fix and expect green.
-- Settings: run the script against a stub `gh` returning `write` for `default_workflow_permissions`. Expect a `FAIL` line and exit 1.
+- Local: drift the working copy (drop `persist-credentials: false`, remove `- id: workflow-sync`, or for docs add a `test` job / a `go.mod`) and run `pre-commit run workflow-sync --all-files`. Expect exit 1 and the rule id. Revert.
+- CI: push a commit with a known violation. Expect `lint` red with the rule's annotation, then push the fix and expect green.
+- Settings: run the script against a stub `gh` returning `write` for `default_workflow_permissions`; expect a `FAIL` line and exit 1:
   ```bash
   GH=./stub-gh scripts/check-repo-settings.sh tclavelloux/promy-crm; echo $?
   ```
-- Then run the real script: `GH_TOKEN= scripts/check-repo-settings.sh`. Expect all `ok`.
-
-## Rollout of the docs profile
-
-Governance repo, after merge (signed):
-
-- `docs-lint/v1.0.0` and moving `docs-lint/v1` on the merge commit. `docs-lint.yml` has no `go-*`/`python-*` sibling to ride, so the tag must exist before a docs caller merges.
-- New immutable `hooks/vX.Y.Z` (never move an existing one) carrying the profile. `templates/docs/pre-commit-config.yaml` names `hooks/v1.8.0`: bump it in the same PR as the tag if the next free version differs.
-
-Docs caller, one PR: `.workflow-sync-profile` (`docs`), `templates/docs/{ci.yml, pre-commit-config.yaml, dependabot.yml, Makefile}`, a `pr-title.yml` calling `pr-title/v1`. Add `lint / lint` and `gitleaks` to the protect-main required checks. Before the tag exists, `go run github.com/tclavelloux/promy-github-workflows/cmd/workflow-sync@<sha> --root .` checks the repo.
-
-Deliberate-failure check: add a `test` job to `ci.yml`, or a `go.mod` next to the marker. Expect `ci-jobs` / `profile` and exit 1. Revert.
-
-## Rollout of hooks/v1.4.0 (Python profile)
-
-Governance repo: merge, then cut the signed immutable `hooks/v1.4.0` on the merge commit. No workflow changed, so no `python-*` tag moves (`python-lint/v1` already has the `workflow-sync` input).
-
-Python caller (promy-market-catalog, step C10), one PR:
-
-- `.pre-commit-config.yaml`: governance `rev: hooks/v1.4.0`, hooks `no-direct-commit-to-main`, `workflow-sync` and optionally `py-vuln` (then add the `vuln:` target from `templates/python/Makefile`; `vuln-target` requires both or neither).
-- `ci.yml`: `with: {workflow-sync: true}` on the `lint` job.
-- Before wiring, `go run github.com/tclavelloux/promy-github-workflows/cmd/workflow-sync@<sha> --root .` lists the drift. On the catalog at `5613540` it reports exactly the two wiring findings above (`ci-lint-sync`, `precommit-governance-repo`).
-- Go callers need nothing: every Go repo gives byte-identical output at `hooks/v1.3.0` and `hooks/v1.4.0`.
-
-## Rollout of hooks/v1.6.0 (release-please + fleet-bot automerge)
-
-`hooks/v1.6.0` carries two rule changes: the `release-please` rule (#46) and the two-bot `ci-automerge` `if:` (#47). One rollout covers both.
-
-Governance repo, done 2026-10-25 (signed):
-
-- `release-please/v1.0.0` and `release-please/v1` on `0b60556`
-- `dependabot-automerge/v1.2.0` on `64e5ea4`; `dependabot-automerge/v1` moved from `v1.1.0` to it
-- `hooks/v1.6.0` on `64e5ea4` (new, immutable; never move an existing `hooks/v*`)
-
-Per repo, ONE PR with all three changes:
-
-- Replace `.github/workflows/release-please.yml` with `templates/release-please.yml`.
-- In `ci.yml`, set the `automerge` job `if:` to `github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'` (see `templates/ci-automerge-job.yml`).
-- Bump the governance `rev:` in `.pre-commit-config.yaml` to `hooks/v1.6.0`.
-
-They ship together because each policy rejects the other's files:
-
-- `hooks/v1.5.1` and older fail the new release-please caller with "no step uses googleapis/release-please-action".
-- `hooks/v1.6.0` fails the old local release-please copy and the single-bot automerge `if:`.
-
-Until a repo's `ci.yml` changes, `dependabot-automerge/v1` already runs the new gate for Dependabot PRs, but the old caller `if:` skips `promy-fleet-bot` PRs before the reusable workflow starts.
-
-promy-frontend: copy `templates/release-please.yml` by hand. It has no `workflow-sync` profile, and it needs the `APP_CLIENT_ID` and `APP_PRIVATE_KEY` secrets first.
+- Then `GH_TOKEN= scripts/check-repo-settings.sh`. Expect all `ok`.
