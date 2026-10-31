@@ -6,7 +6,7 @@
 # - `projects`: every directory with a tracked uv.lock, as in ci.yml. workflow-sync's
 #   vuln-fix rule enforces it. Replace src/app and src/worker with your project
 #   directories.
-# - The PR is never merged for you: a human merges it.
+# - The workflow never merges the PR: the caller's automerge job does, under the gate.
 name: Vuln fix
 
 on:

@@ -39,9 +39,9 @@ Add a pin:
 uv (one PR in governance, one per consumer):
 
 0. Trigger: pin-drift reports uv differs from Dependabot's bundled uv (behind or ahead). Target the uv in `dependabot-core` `uv/helpers/requirements.txt`, not the latest astral release.
-1. Governance: `policy.go` `UVVersion`, the uv-pre-commit `rev` in `templates/python/pre-commit-config.yaml`, README pin text, `docs/workflow-sync.md`, pin tests. Release a new `hooks/vX.Y.Z` tag if the hook changed.
+1. Governance: `policy.go` `UVVersion`, the uv-pre-commit `rev` in `templates/python/pre-commit-config.yaml`, the `uv-version` row in `docs/workflow-sync.md`, pin tests. Release a new `hooks/vX.Y.Z` tag if the hook changed.
 2. Consumer, one PR: `.uv-version`; uv-pre-commit `rev:`; every `COPY --from=ghcr.io/astral-sh/uv:X` in Dockerfiles; `required-version` floors that must rise; `make lock` (or `uvx uv@$(cat .uv-version) lock --project <dir>` per project), never bare `uv lock`: a different local uv writes another lock `revision`.
-3. The pin equals the uv Dependabot bundles: it is the one lock writer that cannot be pinned, and a disagreeing writer flips the lock `revision` (uv >= 0.13.0: 5, <= 0.12.x: 3; measurements in `docs/dependency-automation.md`).
+3. The pin equals the uv Dependabot bundles: it is the one lock writer that cannot be pinned, and a disagreeing writer flips the lock `revision` (uv >= 0.13.0: 5, <= 0.12.x: 3; see [dependency-automation.md](dependency-automation.md#uv-version-and-lock-revision)).
 4. Leave Dependabot's `ignore: ghcr.io/astral-sh/uv`; `workflow-sync` enforces it. `python-vuln-fix` reads `.uv-version`, so nothing else changes.
 
 ruff:
@@ -52,7 +52,7 @@ ruff:
 osv-scanner:
 
 1. Take the `linux_amd64` line from the release's `osv-scanner_SHA256SUMS`.
-2. Edit in one PR: version and sha256 defaults in `python-vuln.yml` and `python-vuln-fix.yml`, `.osv-scanner-version`, `OSVScannerVersion` in `policy.go`, README input table.
+2. Edit in one PR: version and sha256 defaults in `python-vuln.yml` and `python-vuln-fix.yml`, `.osv-scanner-version`, `OSVScannerVersion` in `policy.go`.
 3. The sha256 is not a manifest entry because it is not a version. It moves with the version: a stale digest fails the job closed.
 
 govulncheck:
@@ -76,9 +76,9 @@ actionlint, zizmor:
 1. Edit `.actionlint-version` or `.zizmor-version`.
 2. Fix new findings in the same PR; both gate governance CI.
 
-Governance hooks rev (latest tag: `hooks/v1.6.0`):
+Governance hooks rev:
 
-1. Governance PR: `rev:` in `templates/python/pre-commit-config.yaml`, the README example and README version text.
+1. Governance PR: `rev:` in `templates/python/pre-commit-config.yaml`.
 2. Each consumer: `pre-commit autoupdate --repo https://github.com/tclavelloux/promy-github-workflows`.
 3. Never use the moving `hooks/v1`.
 

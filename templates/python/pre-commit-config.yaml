@@ -10,7 +10,6 @@ default_stages: [pre-commit]
 
 repos:
   # Pin rev to the immutable tag (hooks/vX.Y.Z), never the moving `hooks/v1`.
-  # py-vuln and the Python profile of workflow-sync need hooks/v1.4.0 or later.
   - repo: https://github.com/tclavelloux/promy-github-workflows
     rev: hooks/v1.4.0
     hooks:
