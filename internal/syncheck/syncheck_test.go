@@ -73,7 +73,7 @@ func TestDrift(t *testing.T) {
 		{name: "checkout tag", edits: []edit{ed(ciRel, "actions/checkout@"+checkoutSHA, "actions/checkout@v4\n")}, rules: []string{"sha-pin"}, msg: `pinned to "v4"`},
 		{name: "sha without version comment", edits: []edit{ed(ciRel, checkoutSHA, "3d3c42e5aac5ba805825da76410c181273ba90b1\n")}, rules: []string{"sha-pin"}, msg: "no trailing"},
 		{name: "uppercase sha", edits: []edit{ed(ciRel, "3d3c42e5aac5ba805825da76410c181273ba90b1", "3D3C42E5AAC5BA805825DA76410C181273BA90B1")}, rules: []string{"sha-pin"}, msg: "lowercase"},
-		{name: "checkout persist-credentials", edits: []edit{ed(ciRel, checkoutSHA+"        with:\n          persist-credentials: false\n", checkoutSHA)}, rules: []string{"persist-credentials"}, msg: "persist-credentials: false"},
+		{name: "checkout persist-credentials", edits: []edit{ed(ciRel, checkoutSHA+"        with:\n          persist-credentials: false\n", checkoutSHA+"        with:\n          persist-credentials: true\n")}, rules: []string{"persist-credentials"}, msg: "persist-credentials: false"},
 		{name: "workflow without permissions", do: func(t *testing.T, r string) {
 			writeFile(t, r, ".github/workflows/x.yml", strings.Replace(minimalWF, "permissions:\n  contents: read\n", "", 1)+"      - run: echo hi\n")
 		}, rules: []string{"workflow-permissions"}, msg: "no top-level permissions"},

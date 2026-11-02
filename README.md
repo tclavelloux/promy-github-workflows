@@ -38,6 +38,23 @@ All are called at job level and grant `contents: read` unless stated. Never path
 | [`go-vuln-fix.yml`, `python-vuln-fix.yml`](#vuln-fix) | Weekly `fix(deps)` PR for advisories | Go, Python |
 | [`pin-drift.yml`](#pin-driftyml) | Monthly issue for pins behind upstream | This repo only |
 
+### Docs-only and release PRs
+
+Never path-filter a job; skip steps instead. `go-lint`, `go-docker`, `go-coverage` and `python-docker` run the `pr-scope` block (`scripts/pr-scope.sh`, inlined byte-identical) after a `fetch-depth: 2` checkout. When every file the PR changes is a root `*.md`, a `docs/**/*.md` or `.release-please-manifest.json`, the expensive steps are skipped; the job still runs, so required check names still report.
+
+| Workflow | Skipped | Still runs |
+|---|---|---|
+| `go-lint` | golangci-lint install, run, fmt, config verify, `go mod tidy -diff` | `workflow-sync` |
+| `go-docker` | `docker build` | Dockerfile vs `go` directive gate |
+| `go-coverage` | artifact download, threshold gate, PR comment | `.testcoverage.yml` and `go.mod` checks |
+| `python-docker` | buildx, build, smoke test | Dockerfile exists |
+| caller `test` job | `setup-go`, `go test`, artifact upload | checkout (shape: `templates/ci-test-job.yml`) |
+
+- Skip needs a `pull_request` merge commit with both parents. Anything else (push, depth-1 checkout, git error, empty diff) sets `skip=false` and runs everything.
+- Any file under a `testdata` path, a root-level non-`.md` file, a nested `.md` outside `docs/` or a manifest below the root runs everything.
+- `go-vuln`, `gitleaks`, `pr-title` and the Python lint, typecheck, test and vuln jobs never skip: they are about a minute each or security gates.
+- A caller whose `test` job skips must be on `go-coverage` with this block, or `coverage` fails on the missing artifact. A caller whose `test` job does not skip is safe on any version.
+
 ### `go-lint.yml`
 
 ```yaml
@@ -88,7 +105,7 @@ coverage:
 
 - A missing `.testcoverage.yml` fails the job (no zero-threshold fallback). Canonical shape: `promy-crm`'s.
 - One sticky PR comment: statement-weighted per-package breakdown; on failure, every file below threshold with its uncovered line ranges. The comment posts before the check goes red.
-- Exact `test` and `coverage` job shapes: rules `ci-test-artifact` and `ci-job-permissions`.
+- Exact `test` and `coverage` job shapes: rules `ci-test-artifact` and `ci-job-permissions`. Canonical `test` job, including the docs-only skip: `templates/ci-test-job.yml`.
 
 ### `go-vuln.yml`
 

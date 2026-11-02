@@ -32,9 +32,63 @@ jobs:
       # (github.repository / github.sha of the triggering event), never to
       # promy-github-workflows itself. This is what makes the caller's .testcoverage.yml
       # and go.mod available below.
+      # fetch-depth 2: pr-scope diffs the PR merge commit against its base parent.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
+
+      # Docs-only and release PRs (CHANGELOG.md + manifest) skip the expensive steps
+      # but keep every job, so required check names still report. Fails open.
+      # The block between the markers is byte-identical to scripts/pr-scope.sh.
+      - name: Detect docs-only or release PR
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # >>> pr-scope body
+          # Keep this block byte-identical between scripts/pr-scope.sh and every workflow
+          # that inlines it (governance tests compare them).
+          set +e
+          out="${GITHUB_OUTPUT:-/dev/stdout}"
+
+          # inert reports whether one path cannot affect any gate.
+          inert() {
+            case "$1" in
+              *testdata*) return 1 ;; # fixtures are test inputs, whatever their extension
+              .release-please-manifest.json) return 0 ;;
+              docs/*.md) return 0 ;;
+              */*) return 1 ;;
+              *.md) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          decide() {
+            [ "${EVENT_NAME:-}" = "pull_request" ] || { reason="event is ${EVENT_NAME:-unset}, not pull_request"; return 1; }
+            # A merge commit has two parents: "<sha> <p1> <p2>".
+            [ "$(git rev-list --parents -n 1 HEAD 2>/dev/null | wc -w | tr -d ' ')" = 3 ] ||
+              { reason="HEAD is not a merge commit with both parents fetched (checkout needs fetch-depth: 2)"; return 1; }
+            local list n=0 f bad=""
+            list="$(mktemp)"
+            git diff --name-only -z --no-renames HEAD^1 HEAD >"$list" 2>/dev/null || { rm -f "$list"; reason="git diff failed"; return 1; }
+            while IFS= read -r -d '' f; do
+              n=$((n + 1))
+              if ! inert "$f"; then bad="$f"; break; fi
+            done <"$list"
+            rm -f "$list"
+            # sanitised: the name lands in a workflow command
+            [ -z "$bad" ] || { reason="${bad//[^[:alnum:]._\/-]/?} can affect a gate"; return 1; }
+            [ "$n" -gt 0 ] || { reason="empty change set"; return 1; }
+            reason="$n changed file(s), all docs or release metadata"
+          }
+
+          reason=""
+          if decide; then skip=true; else skip=false; fi
+          echo "skip=${skip}" >>"$out"
+          echo "::notice title=pr-scope::skip=${skip}: ${reason}"
+          # <<< pr-scope body
 
       # No actions/setup-go: go-test-coverage runs as a docker action and the module
       # prefix is parsed straight out of go.mod, so this job needs no Go toolchain.
@@ -60,6 +114,7 @@ jobs:
           echo "prefix=${prefix}/" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.scope.outputs.skip != 'true'
         with:
           name: ${{ inputs.coverage-artifact }}
 
@@ -74,6 +129,7 @@ jobs:
       # remove — .testcoverage.yml decides, and nothing here can contradict it.
       - name: Enforce coverage thresholds
         id: coverage
+        if: steps.scope.outputs.skip != 'true'
         # Deliberately non-fatal here: a failing gate is exactly when the PR comment
         # is most useful, so post it first and re-fail in the last step.
         continue-on-error: true
@@ -84,7 +140,7 @@ jobs:
           breakdown-file-name: coverage-breakdown.txt
 
       - name: Add coverage comment
-        if: inputs.post-pr-comment && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        if: steps.scope.outputs.skip != 'true' && inputs.post-pr-comment && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODULE_PREFIX: ${{ steps.module.outputs.prefix }}
