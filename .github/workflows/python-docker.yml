@@ -42,9 +42,63 @@ jobs:
       matrix:
         project: ${{ fromJSON(inputs.projects) }}
     steps:
+      # fetch-depth 2: pr-scope diffs the PR merge commit against its base parent.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
+
+      # Docs-only and release PRs (CHANGELOG.md + manifest) skip the expensive steps
+      # but keep every job, so required check names still report. Fails open.
+      # The block between the markers is byte-identical to scripts/pr-scope.sh.
+      - name: Detect docs-only or release PR
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # >>> pr-scope body
+          # Keep this block byte-identical between scripts/pr-scope.sh and every workflow
+          # that inlines it (governance tests compare them).
+          set +e
+          out="${GITHUB_OUTPUT:-/dev/stdout}"
+
+          # inert reports whether one path cannot affect any gate.
+          inert() {
+            case "$1" in
+              *testdata*) return 1 ;; # fixtures are test inputs, whatever their extension
+              .release-please-manifest.json) return 0 ;;
+              docs/*.md) return 0 ;;
+              */*) return 1 ;;
+              *.md) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          decide() {
+            [ "${EVENT_NAME:-}" = "pull_request" ] || { reason="event is ${EVENT_NAME:-unset}, not pull_request"; return 1; }
+            # A merge commit has two parents: "<sha> <p1> <p2>".
+            [ "$(git rev-list --parents -n 1 HEAD 2>/dev/null | wc -w | tr -d ' ')" = 3 ] ||
+              { reason="HEAD is not a merge commit with both parents fetched (checkout needs fetch-depth: 2)"; return 1; }
+            local list n=0 f bad=""
+            list="$(mktemp)"
+            git diff --name-only -z --no-renames HEAD^1 HEAD >"$list" 2>/dev/null || { rm -f "$list"; reason="git diff failed"; return 1; }
+            while IFS= read -r -d '' f; do
+              n=$((n + 1))
+              if ! inert "$f"; then bad="$f"; break; fi
+            done <"$list"
+            rm -f "$list"
+            # sanitised: the name lands in a workflow command
+            [ -z "$bad" ] || { reason="${bad//[^[:alnum:]._\/-]/?} can affect a gate"; return 1; }
+            [ "$n" -gt 0 ] || { reason="empty change set"; return 1; }
+            reason="$n changed file(s), all docs or release metadata"
+          }
+
+          reason=""
+          if decide; then skip=true; else skip=false; fi
+          echo "skip=${skip}" >>"$out"
+          echo "::notice title=pr-scope::skip=${skip}: ${reason}"
+          # <<< pr-scope body
 
       - name: Require Dockerfile
         id: image
@@ -61,8 +115,10 @@ jobs:
           echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.scope.outputs.skip != 'true'
 
       - name: Build image
+        if: steps.scope.outputs.skip != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.project }}
@@ -75,6 +131,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=docker-${{ steps.image.outputs.slug }}
 
       - name: Smoke test
+        if: steps.scope.outputs.skip != 'true'
         env:
           IMAGE: promy-ci-build/${{ steps.image.outputs.slug }}:ci
           SMOKE: ${{ inputs.smoke-command }}

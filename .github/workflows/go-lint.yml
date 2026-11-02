@@ -36,9 +36,63 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth 2: pr-scope diffs the PR merge commit against its base parent.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
+
+      # Docs-only and release PRs (CHANGELOG.md + manifest) skip the expensive steps
+      # but keep every job, so required check names still report. Fails open.
+      # The block between the markers is byte-identical to scripts/pr-scope.sh.
+      - name: Detect docs-only or release PR
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # >>> pr-scope body
+          # Keep this block byte-identical between scripts/pr-scope.sh and every workflow
+          # that inlines it (governance tests compare them).
+          set +e
+          out="${GITHUB_OUTPUT:-/dev/stdout}"
+
+          # inert reports whether one path cannot affect any gate.
+          inert() {
+            case "$1" in
+              *testdata*) return 1 ;; # fixtures are test inputs, whatever their extension
+              .release-please-manifest.json) return 0 ;;
+              docs/*.md) return 0 ;;
+              */*) return 1 ;;
+              *.md) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          decide() {
+            [ "${EVENT_NAME:-}" = "pull_request" ] || { reason="event is ${EVENT_NAME:-unset}, not pull_request"; return 1; }
+            # A merge commit has two parents: "<sha> <p1> <p2>".
+            [ "$(git rev-list --parents -n 1 HEAD 2>/dev/null | wc -w | tr -d ' ')" = 3 ] ||
+              { reason="HEAD is not a merge commit with both parents fetched (checkout needs fetch-depth: 2)"; return 1; }
+            local list n=0 f bad=""
+            list="$(mktemp)"
+            git diff --name-only -z --no-renames HEAD^1 HEAD >"$list" 2>/dev/null || { rm -f "$list"; reason="git diff failed"; return 1; }
+            while IFS= read -r -d '' f; do
+              n=$((n + 1))
+              if ! inert "$f"; then bad="$f"; break; fi
+            done <"$list"
+            rm -f "$list"
+            # sanitised: the name lands in a workflow command
+            [ -z "$bad" ] || { reason="${bad//[^[:alnum:]._\/-]/?} can affect a gate"; return 1; }
+            [ "$n" -gt 0 ] || { reason="empty change set"; return 1; }
+            reason="$n changed file(s), all docs or release metadata"
+          }
+
+          reason=""
+          if decide; then skip=true; else skip=false; fi
+          echo "skip=${skip}" >>"$out"
+          echo "::notice title=pr-scope::skip=${skip}: ${reason}"
+          # <<< pr-scope body
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -56,13 +110,14 @@ jobs:
 
       - name: Cache golangci-lint binary
         id: cache
+        if: steps.scope.outputs.skip != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/bin/golangci-lint
           key: golangci-lint-v${{ steps.version.outputs.version }}-${{ runner.os }}
 
       - name: Install golangci-lint
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.cache.outputs.cache-hit != 'true' && steps.scope.outputs.skip != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
           # setup-go v7 defaults GOTOOLCHAIN to `local`, which makes `go install`
@@ -73,10 +128,11 @@ jobs:
         run: go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${VERSION}"
 
       - name: Print golangci-lint version
+        if: steps.scope.outputs.skip != 'true'
         run: golangci-lint --version
 
       - name: Check .golangci-version drift
-        if: hashFiles('.golangci-version') != ''
+        if: hashFiles('.golangci-version') != '' && steps.scope.outputs.skip != 'true'
         env:
           RESOLVED_VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -87,6 +143,7 @@ jobs:
           fi
 
       - name: Run golangci-lint
+        if: steps.scope.outputs.skip != 'true'
         # Interpolate inputs via env rather than directly into the shell: inputs
         # are caller-controlled strings, and direct `${{ inputs.* }}` interpolation
         # into `run:` is a shell-injection surface. go-coverage.yml follows the
@@ -106,6 +163,7 @@ jobs:
       # additive to a moving major: they only ever start passing repos that were
       # already clean locally, never fail a repo that wasn't already failing.
       - name: Check formatting
+        if: steps.scope.outputs.skip != 'true'
         # `golangci-lint fmt --diff` prints a diff and exits non-zero when the
         # repo isn't formatted per its own .golangci.yml settings, and exits 0
         # when clean — verified directly, not assumed. No extra exit-code
@@ -113,12 +171,14 @@ jobs:
         run: golangci-lint fmt --diff
 
       - name: Verify golangci-lint config
+        if: steps.scope.outputs.skip != 'true'
         # Validates the caller's own .golangci.yml against the resolved
         # golangci-lint version's schema. Exits non-zero on an invalid or
         # missing config — verified directly.
         run: golangci-lint config verify
 
       - name: Check go.mod/go.sum tidiness
+        if: steps.scope.outputs.skip != 'true'
         # `go mod tidy -diff` (Go 1.23+) prints a diff and exits non-zero when
         # go.mod/go.sum don't match what `go mod tidy` would produce, and exits
         # 0 when tidy — verified directly. Requires no network fetch beyond
