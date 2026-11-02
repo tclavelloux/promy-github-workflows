@@ -5,12 +5,12 @@
 | Where | What | Trigger |
 |---|---|---|
 | Local hook | `workflow-sync` from `.pre-commit-hooks.yaml`, built with the system `go` (`language: golang`) | `pre-commit` stage on every commit; `pre-commit run workflow-sync --all-files` by hand |
-| CI | `Check fleet governance (workflow-sync)`, last step of the `lint` job of `go-lint.yml` or `python-lint.yml` (matrix index 0 only); the only step of `docs-lint.yml` | Go/Python caller sets `with: workflow-sync: true` on its `lint` job; docs caller's `lint` job calls `docs-lint.yml` (no input) |
+| CI | `Check fleet governance (workflow-sync)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml` or `python-ci.yml` (matrix index 0 only); the only step of `docs-lint.yml` | Go/Python caller sets `with: workflow-sync: true` on its `lint` job (Python `check` job when it uses `python-ci.yml`); docs caller's `lint` job calls `docs-lint.yml` (no input) |
 | By hand | `scripts/check-repo-settings.sh` | `GH_TOKEN= scripts/check-repo-settings.sh [owner/repo ...]` |
 | Governance repo CI | `workflow-sync` job in `ci.yml`: gofmt, `go vet`, `go test` | Every PR here |
 
 - Local hook and CI step run the same code at the same immutable `rev:` of the caller's `.pre-commit-config.yaml`. Policy and checker ship together.
-- The hook needs Go on `PATH` locally. In CI, `setup-go` has already run in `go-lint`; `python-lint` and `docs-lint` add it for that one step.
+- The hook needs Go on `PATH` locally. In CI, `setup-go` has already run in `go-lint`; `python-lint`, `python-ci` and `docs-lint` add it for that one step.
 - The hook has `always_run: true`, `pass_filenames: false`, `verbose: true`. Verbose prints every exemption on success.
 - `--root DIR` checks another directory; default `.`.
 - Output: `<file>:<line>: [<rule>] <message>`. With `GITHUB_ACTIONS=true` it also emits `::error file=..,line=..,title=workflow-sync [<rule>]::<message>` annotations.
@@ -42,6 +42,8 @@ The docs profile (`.workflow-sync-profile`, for a repo with no code such as prom
 
 ## Rules
 
+Transitional job shapes (rule `ci-jobs`): Python accepts `check` or the four legacy jobs. Callers on a `hooks/` rev older than the one cut with this change reject the new shapes, so migrate the rev and the caller in one PR.
+
 Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` and the `register(...)` calls in `internal/syncheck/*.go`.
 
 ### All `.github/workflows/*.y{a,}ml`
@@ -62,14 +64,14 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | `ci-trigger` | `on` is exactly `pull_request` with `branches: [main]` and `types` = {opened, synchronize, ready_for_review, reopened}. No `push` | One run per PR head; `ready_for_review` re-runs jobs skipped while draft |
 | `ci-concurrency` | group `${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress: true` | Superseded pushes stop burning minutes |
 | `ci-permissions` | Top-level exactly `{contents: read}` | Called workflows can only narrow the caller's token |
-| `ci-jobs` | Go: required lint, vuln, test, coverage, gitleaks; `docker` required iff a root `Dockerfile` exists, forbidden otherwise. Python: required lint, typecheck, vuln, test, gitleaks; `docker` required iff a uv project has a `Dockerfile`, forbidden otherwise. Optional in both: automerge. Docs: required lint, gitleaks; optional automerge; test, coverage, vuln, docker and typecheck are forbidden (named in the finding); anything else is unknown. No release-please requirement. Anything else is an unknown job | Same gate set in every repo of a profile |
-| `ci-job-ref` | Go: lint, vuln, docker, coverage `uses:` go-lint, go-vuln, go-docker, go-coverage. Python: lint, typecheck, vuln, test, docker `uses:` python-lint, python-typecheck, python-vuln, python-test, python-docker. Docs: lint `uses:` docs-lint. All: automerge `uses:` dependabot-automerge. Exact governance ref | Policy majors move in one place |
+| `ci-jobs` | Go: required lint, vuln, test, coverage, gitleaks; `docker` required iff a root `Dockerfile` exists, forbidden otherwise. Python: required gitleaks and either the single `check` job (`python-ci.yml`) or all of lint, typecheck, vuln, test (a mix is a finding); `docker` required iff a uv project has a `Dockerfile`, forbidden otherwise. Optional in both: automerge. Docs: required lint, gitleaks; optional automerge; test, coverage, vuln, docker and typecheck are forbidden (named in the finding); anything else is unknown. No release-please requirement. Anything else is an unknown job | Same gate set in every repo of a profile |
+| `ci-job-ref` | Go: lint, vuln, docker, coverage `uses:` go-lint, go-vuln, go-docker, go-coverage. Python: check, lint, typecheck, vuln, test, docker `uses:` python-ci, python-lint, python-typecheck, python-vuln, python-test, python-docker. Docs: lint `uses:` docs-lint. All: automerge `uses:` dependabot-automerge. Exact governance ref | Policy majors move in one place |
 | `ci-draft-skip` | Every job except automerge has `if: github.event.pull_request.draft == false` | Drafts do not spend minutes |
 | `ci-timeout` | Inline (`runs-on`) jobs set `timeout-minutes` (value free) | A hung job cannot burn the budget |
-| `ci-job-permissions` | Go: lint, vuln, docker, test carry no `permissions:`; Python: lint, typecheck, vuln, test, docker carry none. Docs: lint carries none. Go coverage: exactly `{contents: read, pull-requests: write}`, `needs: test`, `secrets: inherit`. gitleaks: exactly `{contents: read, pull-requests: read}`, uses `gitleaks/gitleaks-action`, checkout `fetch-depth: 0` | Read default is the repo setting; only coverage (PR comment) and gitleaks need more |
-| `ci-projects` | Python only. `with.projects` of lint, typecheck, vuln and test is a JSON-array string listing exactly the uv projects; docker lists exactly the uv projects with a `Dockerfile`. Entries are path-cleaned (`./src/app/` = `src/app`) | A project left out has no gate; a listed directory that is not a project fails the reusable workflow |
+| `ci-job-permissions` | Go: lint, vuln, docker, test carry no `permissions:`; Python: check, lint, typecheck, vuln, test, docker carry none. Docs: lint carries none. Go coverage: exactly `{contents: read, pull-requests: write}`, `needs: test`, `secrets: inherit`. gitleaks: exactly `{contents: read, pull-requests: read}`, uses `gitleaks/gitleaks-action`, checkout `fetch-depth: 0` | Read default is the repo setting; only coverage (PR comment) and gitleaks need more |
+| `ci-projects` | Python only. `with.projects` of check (or lint, typecheck, vuln and test) is a JSON-array string listing exactly the uv projects; docker lists exactly the uv projects with a `Dockerfile`. Entries are path-cleaned (`./src/app/` = `src/app`) | A project left out has no gate; a listed directory that is not a project fails the reusable workflow |
 | `ci-test-artifact` | Go only. `test` job uploads `actions/upload-artifact` with name `coverage-profile`, path `coverage.raw.out`, `retention-days: 1`, `if-no-files-found: error` | Contract with `go-coverage.yml`; a missing profile must fail, not pass |
-| `ci-lint-sync` | Go and Python: `lint` job has `with.workflow-sync: true`. Not checked for docs (`docs-lint.yml` has no such input and always runs the check) | Without it CI skips this check and only the local hook guards the repo |
+| `ci-lint-sync` | Go and Python: `lint` job (Python `check` job when present) has `with.workflow-sync: true`. Not checked for docs (`docs-lint.yml` has no such input and always runs the check) | Without it CI skips this check and only the local hook guards the repo |
 | `ci-automerge` | If present: last job; `needs` = every other job; `if` = `github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'`; permissions exactly `{contents: write, pull-requests: write, checks: read, actions: read, statuses: read}` | A job missing from `needs:` could merge past a red check |
 
 ### Other workflow files

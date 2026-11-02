@@ -30,7 +30,8 @@ All are called at job level and grant `contents: read` unless stated. Never path
 | [`go-coverage.yml`](#go-coverageyml) | Gate a coverage profile, sticky PR comment | Go |
 | [`go-vuln.yml`](#go-vulnyml) | govulncheck, called vulns only | Go |
 | [`go-docker.yml`](#go-dockeryml) | Dockerfile `golang:` minor vs `go` directive, then `docker build` | Go |
-| [`python-*.yml`](#python-workflows) | lint, typecheck, vuln, test, docker for uv projects | Python |
+| [`python-ci.yml`](#python-ciyml) | lint, typecheck, test and vuln of each uv project in one job | Python |
+| [`python-*.yml`](#python-workflows) | lint, typecheck, vuln, test (superseded by `python-ci`), docker for uv projects | Python |
 | [`docs-lint.yml`](#docs-lintyml) | `workflow-sync` for a repo with no code | Docs |
 | [`pr-title.yml`](#pr-titleyml) | Conventional Commits PR title | All |
 | [`release-please.yml`](#release-pleaseyml) | Release PR, tag, GitHub release | All |
@@ -52,7 +53,7 @@ Never path-filter a job; skip steps instead. `go-lint`, `go-docker`, `go-coverag
 
 - Skip needs a `pull_request` merge commit with both parents. Anything else (push, depth-1 checkout, git error, empty diff) sets `skip=false` and runs everything.
 - Any file under a `testdata` path, a root-level non-`.md` file, a nested `.md` outside `docs/` or a manifest below the root runs everything.
-- `go-vuln`, `gitleaks`, `pr-title` and the Python lint, typecheck, test and vuln jobs never skip: they are about a minute each or security gates.
+- `go-vuln`, `gitleaks`, `pr-title` and every `python-ci` / Python lint, typecheck, test, vuln step never skip: they are about a minute each or security gates.
 - A caller whose `test` job skips must be on `go-coverage` with this block, or `coverage` fails on the missing artifact. A caller whose `test` job does not skip is safe on any version.
 
 ### `go-lint.yml`
@@ -132,9 +133,30 @@ Fails on any **called** vulnerability (reachable from the caller's code, not mer
 
 Required iff the repo has a root `Dockerfile` (rule `ci-jobs`).
 
+### `python-ci.yml`
+
+One job per uv project (matrix over `projects`) running lint, typecheck, test and vuln as steps named `lint: ...`, `typecheck: ...`, `test: ...`, `vuln: ...`. One checkout, one `setup-uv`, one `uv sync --frozen` per project instead of four. Every step runs even when an earlier one failed; the job fails when any step failed.
+
+```yaml
+jobs:
+  check:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/python-ci.yml@python-ci/v1
+    with:
+      projects: '["src/leaflet","src/store"]'
+      workflow-sync: true
+```
+
+- Check name per project: `check / check (src/store)`.
+- Inputs: `projects`, `ruff-version`, `deptry-args`, `baseline-file`, `require-baseline`, `basedpyright-args`, `markers`, `pytest-args`, `osv-scanner-version`, `osv-scanner-sha256`, `osv-args`, `workflow-sync`. Defaults and semantics equal those of the four workflows below; `args` became `basedpyright-args`, `pytest-args` and `osv-args`.
+- Steps and failure conditions: the tables of `python-lint`, `python-typecheck`, `python-test` and `python-vuln` below. Once per run (matrix index 0): ruff, pin drift, `.python-version`, `projects`, `workflow-sync`.
+- Logic: `scripts/python_pins.py` and `scripts/python_coverage_floor.py`, both inlined and compared byte-for-byte by the governance tests.
+- Migrating: bump the caller's `workflow-sync` hook `rev:` to the `hooks/vX.Y.Z` cut with this change (older revs reject `check` as an unknown job), replace the four caller jobs with `check`, remove them from `automerge.needs` and add `check`, swap the required checks (see below). Rule `ci-jobs` accepts either shape and rejects a mix.
+- `python-lint`, `python-typecheck`, `python-vuln` and `python-test` stay for callers that have not migrated.
+
 ### Python workflows
 
-`python-{lint,typecheck,vuln,test,docker}.yml`, one caller job each:
+`python-{lint,typecheck,vuln,test,docker}.yml`, one caller job each (`lint`, `typecheck`, `vuln` and `test` are superseded by `python-ci.yml` above):
 
 ```yaml
 jobs:

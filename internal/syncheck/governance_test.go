@@ -82,6 +82,31 @@ func TestPolicyOSVScannerVersion(t *testing.T) {
 	}
 }
 
+// python-ci.yml repeats the ruff and osv-scanner decisions of python-lint.yml and
+// python-vuln.yml; the three must agree until the legacy workflows are retired.
+func TestPythonCIDefaultsMatchLegacy(t *testing.T) {
+	const ci = ".github/workflows/python-ci.yml"
+	in := func(rel string) *yaml.Node { return path(govYAML(t, rel), "on", "workflow_call", "inputs") }
+	cases := []struct{ name, legacy, input, legacyInput string }{
+		{"ruff version", govPyLintYML, "ruff-version", "ruff-version"},
+		{"osv-scanner version", govPyVulnYML, "osv-scanner-version", "osv-scanner-version"},
+		{"osv-scanner sha256", govPyVulnYML, "osv-scanner-sha256", "osv-scanner-sha256"},
+		{"deptry args", govPyLintYML, "deptry-args", "deptry-args"},
+		{"baseline file", ".github/workflows/python-typecheck.yml", "baseline-file", "baseline-file"},
+		{"markers", ".github/workflows/python-test.yml", "markers", "markers"},
+	}
+	for _, c := range cases {
+		got := scalar(path(in(ci), c.input, "default"))
+		want := scalar(path(in(c.legacy), c.legacyInput, "default"))
+		if got != want {
+			t.Errorf("%s: %s %s default = %q but %s = %q", c.name, ci, c.input, got, c.legacy, want)
+		}
+	}
+	if got := strings.TrimPrefix(scalar(path(in(ci), "ruff-version", "default")), "v"); got != RuffVersion {
+		t.Errorf("policy.go RuffVersion = %s but %s ruff-version default = %q", RuffVersion, ci, got)
+	}
+}
+
 func TestPolicyCommitTypes(t *testing.T) {
 	n := path(govYAML(t, govPRTitleYML), "on", "workflow_call", "inputs", "types", "default")
 	got := setOf(strings.Fields(scalar(n))...)

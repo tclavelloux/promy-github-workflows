@@ -46,13 +46,13 @@ uv (one PR in governance, one per consumer):
 
 ruff:
 
-1. Governance: `policy.go` `RuffVersion`, `python-lint.yml` `ruff-version` default, ruff-pre-commit `rev` in the template.
+1. Governance: `policy.go` `RuffVersion`, `python-lint.yml` and `python-ci.yml` `ruff-version` defaults, ruff-pre-commit `rev` in the template.
 2. Consumer: `.ruff-version`, ruff-pre-commit `rev:` (with `v`), `ruff.toml` `required-version` floor. A `.ruff-version` that differs from the workflow input only warns; a differing pre-commit rev fails.
 
 osv-scanner:
 
 1. Take the `linux_amd64` line from the release's `osv-scanner_SHA256SUMS`.
-2. Edit in one PR: version and sha256 defaults in `python-vuln.yml` and `python-vuln-fix.yml`, `.osv-scanner-version`, `OSVScannerVersion` in `policy.go`.
+2. Edit in one PR: version and sha256 defaults in `python-vuln.yml`, `python-ci.yml` and `python-vuln-fix.yml`, `.osv-scanner-version`, `OSVScannerVersion` in `policy.go`.
 3. The sha256 is not a manifest entry because it is not a version. It moves with the version: a stale digest fails the job closed.
 
 govulncheck:

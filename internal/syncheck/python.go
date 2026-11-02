@@ -109,7 +109,11 @@ func (c *checker) ciProjects(byName map[string]ciJob) {
 func (c *checker) testedProjects() []string {
 	all := c.uvProjects()
 	p := c.loadYAML(ciFile)
-	got, err := parseProjects(path(p.root, "jobs", "test", "with", "projects"))
+	n := path(p.root, "jobs", "test", "with", "projects")
+	if n == nil {
+		n = path(p.root, "jobs", PyCICheckJob, "with", "projects")
+	}
+	got, err := parseProjects(n)
 	if err != nil {
 		return all
 	}

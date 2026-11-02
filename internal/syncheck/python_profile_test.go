@@ -144,7 +144,7 @@ func TestPythonDrift(t *testing.T) {
 		}, rules: []string{"ci-jobs"}, msg: `required job "typecheck"`},
 		{name: "go job set is unknown", do: func(t *testing.T, r string) {
 			appendFile(t, r, ciRel, "\n  coverage:\n    if: github.event.pull_request.draft == false\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: echo hi\n")
-		}, rules: []string{"ci-jobs"}, msg: `unknown job "coverage"; allowed: lint, typecheck, vuln, test, gitleaks, docker, automerge`},
+		}, rules: []string{"ci-jobs"}, msg: `unknown job "coverage"; allowed: gitleaks, docker, lint, typecheck, vuln, test, check, automerge`},
 		{name: "docker job without Dockerfiles", do: func(t *testing.T, r string) {
 			rm("src/app/Dockerfile")(t, r)
 			rm("src/worker/Dockerfile")(t, r)
