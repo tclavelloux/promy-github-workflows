@@ -176,6 +176,7 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 			c.add(ciFile, jobsKey.Line, ruleCIJobs, "required job %q is missing", n)
 		}
 	}
+	c.ciShape(jobsKey, byName)
 	_, hasDocker := byName[CIDockerJob]
 	switch c.prof {
 	case docsProfile:
@@ -207,6 +208,36 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 				list = append(append(append([]string{}, required...), CIDockerJob), optional...)
 			}
 			c.add(ciFile, j.line(), ruleCIJobs, "unknown job %q; allowed: %s", j.name, strings.Join(list, ", "))
+		}
+	}
+}
+
+// ciShape checks the transitional Python job sets: the single `check` job
+// (python-ci.yml) or the four legacy jobs lint, typecheck, vuln, test. Both pass
+// until every caller has migrated; a mix runs lint/typecheck/test/vuln twice.
+func (c *checker) ciShape(jobsKey *yaml.Node, byName map[string]ciJob) {
+	switch c.prof {
+	case pythonProfile:
+		check, hasCheck := byName[PyCICheckJob]
+		var legacy, missing []string
+		for _, n := range PyCILegacyJobs {
+			if _, ok := byName[n]; ok {
+				legacy = append(legacy, n)
+			} else {
+				missing = append(missing, n)
+			}
+		}
+		switch {
+		case hasCheck && len(legacy) > 0:
+			c.add(ciFile, check.line(), ruleCIJobs, "job %q (python-ci.yml) replaces %s; remove %s (they would run every check twice)", PyCICheckJob, strings.Join(PyCILegacyJobs, ", "), strings.Join(legacy, ", "))
+		case !hasCheck:
+			for _, n := range missing {
+				if len(legacy) == 0 {
+					c.add(ciFile, jobsKey.Line, ruleCIJobs, "required job %q is missing; add the single job %q (python-ci.yml) or the four jobs %s", n, PyCICheckJob, strings.Join(PyCILegacyJobs, ", "))
+				} else {
+					c.add(ciFile, jobsKey.Line, ruleCIJobs, "required job %q is missing", n)
+				}
+			}
 		}
 	}
 }
@@ -320,13 +351,17 @@ func (c *checker) ciArtifact(byName map[string]ciJob) {
 }
 
 func (c *checker) ciLintSync(byName map[string]ciJob) {
-	j, ok := byName["lint"]
+	name := "lint"
+	if _, ok := byName[PyCICheckJob]; ok && c.prof == pythonProfile {
+		name = PyCICheckJob // python-ci.yml hosts the lint steps
+	}
+	j, ok := byName[name]
 	if !ok {
 		return
 	}
 	n := path(j.node, "with", "workflow-sync")
 	if !isBool(n, true) {
-		c.add(ciFile, line(n, j.line()), ruleCILintSync, `job "lint" with.workflow-sync = %s; want boolean true (add `+"`with: {workflow-sync: true}`"+` to run this check in CI)`, orAbsent(n))
+		c.add(ciFile, line(n, j.line()), ruleCILintSync, `job %q with.workflow-sync = %s; want boolean true (add `+"`with: {workflow-sync: true}`"+` to run this check in CI)`, name, orAbsent(n))
 	}
 }
 

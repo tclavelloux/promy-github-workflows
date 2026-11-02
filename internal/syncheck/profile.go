@@ -72,7 +72,7 @@ var goProfile = &profile{
 var pythonProfile = &profile{
 	name:         "python",
 	requiredJobs: PyCIRequiredJobs,
-	optionalJobs: CIOptionalJobs,
+	optionalJobs: PyCIOptionalJobs,
 	reusableJobs: PyCIReusableJobs,
 	noPermJobs:   PyCINoPermissionJobs,
 	vulnHook:     HookPyVuln,
@@ -81,7 +81,7 @@ var pythonProfile = &profile{
 	vulnPCTmpl:   "templates/python/pre-commit-config.yaml",
 	testEntries:  []string{"pytest", "make test"},
 	sourceKind:   ".py",
-	ciMissing:    "with jobs lint, typecheck, vuln, test, gitleaks (plus docker when a uv project has a Dockerfile); see templates/python/ci.yml",
+	ciMissing:    "with jobs check (or the legacy lint, typecheck, vuln, test) and gitleaks (plus docker when a uv project has a Dockerfile); see templates/python/ci.yml",
 	precommitTpl: "templates/python/pre-commit-config.yaml",
 	dependabotTp: "add it with uv (every uv project), docker (every uv project with a Dockerfile) and github-actions entries (see templates/python/dependabot.yml)",
 

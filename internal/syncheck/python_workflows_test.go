@@ -7,7 +7,7 @@ import (
 )
 
 // pythonWorkflows are the reusable workflows added with the Python profile.
-var pythonWorkflows = []string{"python-lint", "python-typecheck", "python-vuln", "python-test", "python-docker"}
+var pythonWorkflows = []string{"python-lint", "python-typecheck", "python-vuln", "python-test", "python-docker", "python-ci"}
 
 var (
 	shaPinned   = regexp.MustCompile(`^[^@\s]+@[0-9a-f]{40}$`)
@@ -20,6 +20,8 @@ var (
 func TestPythonInlinedBodiesMatchScripts(t *testing.T) {
 	cases := []struct{ script, workflow, marker string }{
 		{"scripts/python_pins.py", ".github/workflows/python-lint.yml", "python-pins body"},
+		{"scripts/python_pins.py", ".github/workflows/python-ci.yml", "python-pins body"},
+		{"scripts/python_coverage_floor.py", ".github/workflows/python-ci.yml", "python-coverage-floor body"},
 		{"scripts/python_coverage_floor.py", ".github/workflows/python-test.yml", "python-coverage-floor body"},
 		{"scripts/python_vuln_fix.py", ".github/workflows/python-vuln-fix.yml", "python-vuln-fix body"},
 	}
@@ -71,8 +73,12 @@ func TestPythonWorkflowsHardRules(t *testing.T) {
 			t.Errorf("%s declares workflow_call secrets; Python workflows take none", rel)
 		}
 		jobs := val(doc, "jobs")
-		if len(keys(jobs)) != 1 || keys(jobs)[0] != strings.TrimPrefix(name, "python-") {
-			t.Errorf("%s jobs = %v, want the single job %q (the caller's check name depends on it)", rel, keys(jobs), strings.TrimPrefix(name, "python-"))
+		wantJob := strings.TrimPrefix(name, "python-")
+		if name == "python-ci" {
+			wantJob = PyCICheckJob // python-ci.yml's one job replaces lint, typecheck, vuln and test
+		}
+		if len(keys(jobs)) != 1 || keys(jobs)[0] != wantJob {
+			t.Errorf("%s jobs = %v, want the single job %q (the caller's check name depends on it)", rel, keys(jobs), wantJob)
 		}
 		for _, jid := range keys(jobs) {
 			job := val(jobs, jid)

@@ -42,6 +42,7 @@ var WorkflowMajors = map[string]int{
 	"pr-title":             1,
 	"dependabot-automerge": 1,
 	"go-vuln-fix":          1,
+	"python-ci":            1,
 	"python-lint":          1,
 	"python-typecheck":     1,
 	"python-vuln":          1,
@@ -74,15 +75,20 @@ var (
 // Job sets of ci.yml in the Python profile. `docker` is required iff a uv
 // project has a Dockerfile; automerge is optional, as in Go.
 var (
-	PyCIRequiredJobs = []string{"lint", "typecheck", "vuln", "test", "gitleaks"}
+	// Either the single `check` job (python-ci.yml) or the four legacy jobs
+	// PyCILegacyJobs (python-lint, -typecheck, -vuln, -test); never a mix.
+	PyCIRequiredJobs = []string{"gitleaks"}
+	PyCICheckJob     = "check"
+	PyCILegacyJobs   = []string{"lint", "typecheck", "vuln", "test"}
+	PyCIOptionalJobs = []string{"lint", "typecheck", "vuln", "test", "check", "automerge"}
 	PyCIReusableJobs = map[string]string{
-		"lint": "python-lint", "typecheck": "python-typecheck", "vuln": "python-vuln",
+		"check": "python-ci", "lint": "python-lint", "typecheck": "python-typecheck", "vuln": "python-vuln",
 		"test": "python-test", "docker": "python-docker", "automerge": "dependabot-automerge",
 	}
-	PyCINoPermissionJobs = []string{"lint", "typecheck", "vuln", "test", "docker"}
+	PyCINoPermissionJobs = []string{"check", "lint", "typecheck", "vuln", "test", "docker"}
 	// PyCIAllProjectJobs must list every uv project in with.projects; docker
 	// lists every uv project that has a Dockerfile.
-	PyCIAllProjectJobs = []string{"lint", "typecheck", "vuln", "test"}
+	PyCIAllProjectJobs = []string{"check", "lint", "typecheck", "vuln", "test"}
 )
 
 // Job sets of ci.yml in the docs profile: a repo with no code has nothing to
