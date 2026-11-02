@@ -1,39 +1,36 @@
-# Canonical `test` job of a Go caller's .github/workflows/ci.yml (profile: go).
-# Replace `timeout-minutes` as the repo needs. Keep the pr-scope step and its `if:`
-# gates: a docs-only or release PR then skips the 9-13 minute test run while the
-# job, and the `coverage` job that follows it, still report a green check.
-#
-# The pr-scope block is byte-identical to scripts/pr-scope.sh
-# (internal/syncheck/prscope_test.go compares them).
-#
-# The `go test` line must stay in step with `make check-coverage`; add services
-# (databases, Redis) to the job as the repo's tests need.
-name: CI
+name: Go Test
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, ready_for_review, reopened]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
+    inputs:
+      timeout-minutes:
+        description: Job timeout in minutes, required; size it to the repo suite so a hung test cannot burn the minutes budget.
+        required: true
+        type: number
+      go-version-file:
+        description: Path to the go.mod (or go.work) file setup-go reads the toolchain version from.
+        required: false
+        type: string
+        default: go.mod
 
 permissions:
   contents: read
 
 jobs:
   test:
-    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       # fetch-depth 2: pr-scope diffs the PR merge commit against its base parent.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
           fetch-depth: 2
+          persist-credentials: false
 
+      # Docs-only and release PRs (CHANGELOG.md + manifest) skip the expensive steps
+      # but keep the job, so the required check name still reports and `coverage`
+      # (go-coverage, which skips the same PRs) is not starved of an artifact. Fails open.
+      # The block between the markers is byte-identical to scripts/pr-scope.sh.
       - name: Detect docs-only or release PR
         id: scope
         shell: bash
@@ -86,12 +83,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: steps.scope.outputs.skip != 'true'
         with:
-          go-version-file: go.mod
+          go-version-file: ${{ inputs.go-version-file }}
 
+      # Keep in step with `make check-coverage` in the caller.
       - name: Run tests
         if: steps.scope.outputs.skip != 'true'
         run: go test -race -failfast -coverpkg=./... -covermode=atomic -coverprofile=coverage.raw.out -count=1 ./...
 
+      # Contract with go-coverage.yml: artifact `coverage-profile` holding `coverage.raw.out`.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.scope.outputs.skip != 'true'
         with:

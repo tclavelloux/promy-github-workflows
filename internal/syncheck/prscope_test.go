@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	prScopeScript   = "scripts/pr-scope.sh"
-	prScopeMarker   = "pr-scope body"
-	prScopeTemplate = "templates/ci-test-job.yml"
+	prScopeScript = "scripts/pr-scope.sh"
+	prScopeMarker = "pr-scope body"
+	prScopeGoTest = ".github/workflows/go-test.yml"
 )
 
 // prScopeUsers are the files that inline the script; each job that does so has a
@@ -21,7 +21,7 @@ var prScopeUsers = []string{
 	".github/workflows/go-docker.yml",
 	".github/workflows/go-lint.yml",
 	".github/workflows/python-docker.yml",
-	prScopeTemplate,
+	".github/workflows/go-test.yml",
 }
 
 // gitIn runs git in dir with a fixed identity; failures fail the test.
@@ -292,18 +292,18 @@ func TestPRScopeKeepsStaticGates(t *testing.T) {
 	}
 }
 
-// The test template keeps the artifact contract of rule ci-test-artifact, so a
+// go-test.yml keeps the artifact contract go-coverage.yml reads, so a
 // skipped run is the only way the artifact goes missing, and coverage skips with it.
-func TestPRScopeTemplateKeepsArtifactContract(t *testing.T) {
+func TestPRScopeGoTestKeepsArtifactContract(t *testing.T) {
 	for _, w := range [][2]string{{"name", "coverage-profile"}, {"path", "coverage.raw.out"}, {"retention-days", "1"}, {"if-no-files-found", "error"}} {
 		found := false
-		for _, s := range val(path(govYAML(t, prScopeTemplate), "jobs", "test"), "steps").Content {
+		for _, s := range val(path(govYAML(t, prScopeGoTest), "jobs", "test"), "steps").Content {
 			if strings.HasPrefix(scalar(val(deref(s), "uses")), "actions/upload-artifact@") {
 				found = scalar(path(deref(s), "with", w[0])) == w[1]
 			}
 		}
 		if !found {
-			t.Errorf("%s: upload-artifact with.%s != %q", prScopeTemplate, w[0], w[1])
+			t.Errorf("%s: upload-artifact with.%s != %q", prScopeGoTest, w[0], w[1])
 		}
 	}
 }

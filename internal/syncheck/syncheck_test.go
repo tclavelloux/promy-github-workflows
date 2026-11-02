@@ -62,8 +62,7 @@ func TestDrift(t *testing.T) {
 		{name: "gitleaks no permissions", edits: []edit{ed(ciRel, "    permissions:\n      contents: read\n      pull-requests: read\n    steps:", "    steps:")}, rules: []string{"ci-job-permissions"}, msg: `job "gitleaks" permissions = (absent)`},
 		{name: "gitleaks fetch-depth", edits: []edit{ed(ciRel, "          fetch-depth: 0\n", "")}, rules: []string{"ci-job-permissions"}, msg: "fetch-depth"},
 		{name: "lint has permissions", edits: []edit{ed(ciRel, "  lint:\n", "  lint:\n    permissions:\n      contents: write\n")}, rules: []string{"ci-job-permissions"}, msg: `job "lint"`},
-		{name: "retention 7", edits: []edit{ed(ciRel, "retention-days: 1", "retention-days: 7")}, rules: []string{"ci-test-artifact"}, msg: "retention-days"},
-		{name: "if-no-files-found warn", edits: []edit{ed(ciRel, "if-no-files-found: error", "if-no-files-found: warn")}, rules: []string{"ci-test-artifact"}, msg: "if-no-files-found"},
+		{name: "test job inline again", edits: []edit{ed(ciRel, "go-test.yml@go-test/v1", "go-lint.yml@go-lint/v1")}, rules: []string{"ci-job-ref"}, msg: `job "test" uses`},
 		{name: "lint bare v1", edits: []edit{ed(ciRel, "go-lint.yml@go-lint/v1", "go-lint.yml@v1")}, rules: []string{"governance-ref"}, msg: `want "go-lint/v1"`},
 		{name: "coverage v1", edits: []edit{ed(ciRel, "go-coverage/v2", "go-coverage/v1")}, rules: []string{"governance-ref"}, msg: `want "go-coverage/v2"`},
 		{name: "lint main", edits: []edit{ed(ciRel, "go-lint.yml@go-lint/v1", "go-lint.yml@main")}, rules: []string{"governance-ref"}, msg: `"main"`},
@@ -73,7 +72,7 @@ func TestDrift(t *testing.T) {
 		{name: "checkout tag", edits: []edit{ed(ciRel, "actions/checkout@"+checkoutSHA, "actions/checkout@v4\n")}, rules: []string{"sha-pin"}, msg: `pinned to "v4"`},
 		{name: "sha without version comment", edits: []edit{ed(ciRel, checkoutSHA, "3d3c42e5aac5ba805825da76410c181273ba90b1\n")}, rules: []string{"sha-pin"}, msg: "no trailing"},
 		{name: "uppercase sha", edits: []edit{ed(ciRel, "3d3c42e5aac5ba805825da76410c181273ba90b1", "3D3C42E5AAC5BA805825DA76410C181273BA90B1")}, rules: []string{"sha-pin"}, msg: "lowercase"},
-		{name: "checkout persist-credentials", edits: []edit{ed(ciRel, checkoutSHA+"        with:\n          persist-credentials: false\n", checkoutSHA+"        with:\n          persist-credentials: true\n")}, rules: []string{"persist-credentials"}, msg: "persist-credentials: false"},
+		{name: "checkout persist-credentials", edits: []edit{ed(ciRel, checkoutSHA+"        with:\n          fetch-depth: 0\n          persist-credentials: false\n", checkoutSHA+"        with:\n          fetch-depth: 0\n          persist-credentials: true\n")}, rules: []string{"persist-credentials"}, msg: "persist-credentials: false"},
 		{name: "workflow without permissions", do: func(t *testing.T, r string) {
 			writeFile(t, r, ".github/workflows/x.yml", strings.Replace(minimalWF, "permissions:\n  contents: read\n", "", 1)+"      - run: echo hi\n")
 		}, rules: []string{"workflow-permissions"}, msg: "no top-level permissions"},
@@ -97,7 +96,7 @@ func TestDrift(t *testing.T) {
 			writeFile(t, r, ciRel, s[:strings.Index(s, "  gitleaks:")])
 		}, rules: []string{"ci-jobs"}, msg: `required job "gitleaks"`},
 		{name: "ci.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, ciRel)) }, rules: []string{"ci-jobs"}, msg: "file missing"},
-		{name: "test without timeout", edits: []edit{ed(ciRel, "    timeout-minutes: 15\n", "")}, rules: []string{"ci-timeout"}, msg: `job "test"`},
+		{name: "gitleaks without timeout", edits: []edit{ed(ciRel, "    timeout-minutes: 5\n", "")}, rules: []string{"ci-timeout"}, msg: `job "gitleaks"`},
 		{name: "automerge not last", base: "pass-rollout", do: func(t *testing.T, r string) {
 			s := readFile(t, r, ciRel)
 			i := strings.Index(s, "  # List EVERY")

@@ -19,13 +19,12 @@ const (
 	ruleCIDraftSkip   = "ci-draft-skip"
 	ruleCITimeout     = "ci-timeout"
 	ruleCIJobPerms    = "ci-job-permissions"
-	ruleCIArtifact    = "ci-test-artifact"
 	ruleCILintSync    = "ci-lint-sync"
 	ruleCIAutomerge   = "ci-automerge"
 )
 
 var _ = register(ruleCITrigger, ruleCIConcurrency, ruleCIPerms, ruleCIJobs, ruleCIJobRef,
-	ruleCIDraftSkip, ruleCITimeout, ruleCIJobPerms, ruleCIArtifact, ruleCILintSync, ruleCIAutomerge)
+	ruleCIDraftSkip, ruleCITimeout, ruleCIJobPerms, ruleCILintSync, ruleCIAutomerge)
 
 type ciJob struct {
 	name string
@@ -99,10 +98,7 @@ func (c *checker) checkCI() {
 		}
 	}
 	c.ciJobPermissions(byName)
-	switch c.prof {
-	case goProfile:
-		c.ciArtifact(byName)
-	case pythonProfile:
+	if c.prof == pythonProfile {
 		c.ciProjects(byName)
 	}
 	if c.prof != docsProfile { // docs-lint always runs workflow-sync; it has no input to switch off
@@ -319,34 +315,6 @@ func (c *checker) gitleaksSteps(j ciJob) {
 	}
 	if !hasCheckout {
 		c.add(ciFile, j.line(), ruleCIJobPerms, `job "gitleaks" has no actions/checkout step with fetch-depth: 0`)
-	}
-}
-
-func (c *checker) ciArtifact(byName map[string]ciJob) {
-	j, ok := byName["test"]
-	if !ok {
-		return
-	}
-	var up *yaml.Node
-	if steps := val(j.node, "steps"); isSeq(steps) {
-		for _, s := range steps.Content {
-			if strings.HasPrefix(strings.ToLower(scalar(val(deref(s), "uses"))), "actions/upload-artifact@") {
-				up = deref(s)
-			}
-		}
-	}
-	if up == nil {
-		c.add(ciFile, j.line(), ruleCIArtifact, `job "test" has no actions/upload-artifact step; the coverage job needs artifact coverage-profile`)
-		return
-	}
-	for _, w := range [][2]string{
-		{"name", "coverage-profile"}, {"path", "coverage.raw.out"},
-		{"retention-days", "1"}, {"if-no-files-found", "error"},
-	} {
-		n := path(up, "with", w[0])
-		if scalar(n) != w[1] {
-			c.add(ciFile, line(n, val(up, "uses").Line), ruleCIArtifact, "test artifact with.%s = %q; want %q", w[0], scalar(n), w[1])
-		}
 	}
 }
 
