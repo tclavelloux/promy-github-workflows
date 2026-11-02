@@ -37,6 +37,7 @@ const (
 var WorkflowMajors = map[string]int{
 	"go-lint":              1,
 	"go-vuln":              1,
+	"go-test":              1,
 	"go-coverage":          2,
 	"go-docker":            1,
 	"pr-title":             1,
@@ -66,7 +67,7 @@ var (
 	// CIReusableJobs call a governance workflow; value is the workflow name.
 	CIReusableJobs = map[string]string{
 		"lint": "go-lint", "vuln": "go-vuln", "docker": "go-docker",
-		"coverage": "go-coverage", "automerge": "dependabot-automerge",
+		"test": "go-test", "coverage": "go-coverage", "automerge": "dependabot-automerge",
 	}
 	// CINoPermissionJobs must not carry a permissions: key (top-level read applies).
 	CINoPermissionJobs = []string{"lint", "vuln", "docker", "test"}

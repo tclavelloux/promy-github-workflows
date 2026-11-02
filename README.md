@@ -27,6 +27,7 @@ All are called at job level and grant `contents: read` unless stated. Never path
 | Workflow | Purpose | Profile |
 |---|---|---|
 | [`go-lint.yml`](#go-lintyml) | golangci-lint, fmt, config verify, `go mod tidy -diff`, `workflow-sync` | Go |
+| [`go-test.yml`](#go-testyml) | `go test -race` with coverage profile upload | Go |
 | [`go-coverage.yml`](#go-coverageyml) | Gate a coverage profile, sticky PR comment | Go |
 | [`go-vuln.yml`](#go-vulnyml) | govulncheck, called vulns only | Go |
 | [`go-docker.yml`](#go-dockeryml) | Dockerfile `golang:` minor vs `go` directive, then `docker build` | Go |
@@ -41,7 +42,7 @@ All are called at job level and grant `contents: read` unless stated. Never path
 
 ### Docs-only and release PRs
 
-Never path-filter a job; skip steps instead. `go-lint`, `go-docker`, `go-coverage` and `python-docker` run the `pr-scope` block (`scripts/pr-scope.sh`, inlined byte-identical) after a `fetch-depth: 2` checkout. When every file the PR changes is a root `*.md`, a `docs/**/*.md` or `.release-please-manifest.json`, the expensive steps are skipped; the job still runs, so required check names still report.
+Never path-filter a job; skip steps instead. `go-lint`, `go-test`, `go-docker`, `go-coverage` and `python-docker` run the `pr-scope` block (`scripts/pr-scope.sh`, inlined byte-identical) after a `fetch-depth: 2` checkout. When every file the PR changes is a root `*.md`, a `docs/**/*.md` or `.release-please-manifest.json`, the expensive steps are skipped; the job still runs, so required check names still report.
 
 | Workflow | Skipped | Still runs |
 |---|---|---|
@@ -49,12 +50,12 @@ Never path-filter a job; skip steps instead. `go-lint`, `go-docker`, `go-coverag
 | `go-docker` | `docker build` | Dockerfile vs `go` directive gate |
 | `go-coverage` | artifact download, threshold gate, PR comment | `.testcoverage.yml` and `go.mod` checks |
 | `python-docker` | buildx, build, smoke test | Dockerfile exists |
-| caller `test` job | `setup-go`, `go test`, artifact upload | checkout (shape: `templates/ci-test-job.yml`) |
+| `go-test` | `setup-go`, `go test`, artifact upload | checkout |
 
 - Skip needs a `pull_request` merge commit with both parents. Anything else (push, depth-1 checkout, git error, empty diff) sets `skip=false` and runs everything.
 - Any file under a `testdata` path, a root-level non-`.md` file, a nested `.md` outside `docs/` or a manifest below the root runs everything.
 - `go-vuln`, `gitleaks`, `pr-title` and every `python-ci` / Python lint, typecheck, test, vuln step never skip: they are about a minute each or security gates.
-- A caller whose `test` job skips must be on `go-coverage` with this block, or `coverage` fails on the missing artifact. A caller whose `test` job does not skip is safe on any version.
+- `go-test` and `go-coverage` skip on the same PRs, so `coverage` never waits on a missing artifact. A caller still on an inline `test` job that does not skip is safe on any `go-coverage` version; one that skips needs this block in `go-coverage`.
 
 ### `go-lint.yml`
 
@@ -77,24 +78,28 @@ Fails on:
 
 A `.golangci-version` that differs from the `golangci-lint-version` default emits a `::warning`, never a failure.
 
-### `go-coverage.yml`
-
-Gates a profile the caller produced; it runs no tests. Thresholds and exclusions come only from the caller's `.testcoverage.yml` (also read by the pre-push hook); `module-prefix` comes from `go.mod`.
+### `go-test.yml`
 
 ```yaml
 test:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
-      with:
-        go-version-file: go.mod
-    - run: go test -race -failfast -coverpkg=./... -covermode=atomic -coverprofile=coverage.raw.out -count=1 ./...
-    - uses: actions/upload-artifact@v4
-      with:
-        name: coverage-profile
-        path: coverage.raw.out
+  if: github.event.pull_request.draft == false
+  uses: tclavelloux/promy-github-workflows/.github/workflows/go-test.yml@go-test/v1
+  with:
+    timeout-minutes: 20
+```
 
+- Check name: `test / test` (caller job `test`, reusable job `test`). Update the branch ruleset's required context from `test`.
+- Runs `go test -race -failfast -coverpkg=./... -covermode=atomic -coverprofile=coverage.raw.out -count=1 ./...` on `ubuntu-latest`, then uploads artifact `coverage-profile` (`coverage.raw.out`, 1 day, `if-no-files-found: error`) for `coverage`. Keep the command in step with `make check-coverage`.
+- Inputs: `timeout-minutes` (required, number), `go-version-file` (default `go.mod`).
+- Runs no services: a repo whose tests need a database or Redis cannot use it (none do today).
+- `workflow-sync` requires this job from `hooks/v1.11.0`; earlier tags require the inline job it replaces. Bump `rev:` in the same PR that adopts it.
+- Docs-only and release PRs skip `setup-go`, `go test` and the upload; the job still reports green.
+
+### `go-coverage.yml`
+
+Gates the profile `go-test.yml` uploads; it runs no tests. Thresholds and exclusions come only from the caller's `.testcoverage.yml` (also read by the pre-push hook); `module-prefix` comes from `go.mod`.
+
+```yaml
 coverage:
   needs: test
   permissions:
@@ -106,7 +111,7 @@ coverage:
 
 - A missing `.testcoverage.yml` fails the job (no zero-threshold fallback). Canonical shape: `promy-crm`'s.
 - One sticky PR comment: statement-weighted per-package breakdown; on failure, every file below threshold with its uncovered line ranges. The comment posts before the check goes red.
-- Exact `test` and `coverage` job shapes: rules `ci-test-artifact` and `ci-job-permissions`. Canonical `test` job, including the docs-only skip: `templates/ci-test-job.yml`.
+- Exact `coverage` job shape: rule `ci-job-permissions`. Inputs `coverage-artifact` (default `coverage-profile`) and `profile-filename` (default `coverage.raw.out`) match what `go-test.yml` uploads.
 
 ### `go-vuln.yml`
 
