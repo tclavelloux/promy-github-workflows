@@ -7,7 +7,7 @@ on:
         description: golangci-lint version to install (with or without a leading `v`). The single place the fleet's linter version is decided — bumping this bumps all six repos on their next CI run.
         required: false
         type: string
-        default: v2.13.2
+        default: v2.15.0
       timeout:
         description: golangci-lint --timeout value. A Go duration string (e.g. `5m`), not a number.
         required: false
@@ -104,7 +104,7 @@ jobs:
           RAW_VERSION: ${{ inputs.golangci-lint-version }}
         run: |
           # Normalize: strip a leading 'v' if present, then re-add it consistently,
-          # so this input and .golangci-version's bare `2.13.2` are interchangeable.
+          # so this input and .golangci-version's bare `2.15.0` are interchangeable.
           VERSION="${RAW_VERSION#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 

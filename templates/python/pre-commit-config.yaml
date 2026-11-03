@@ -11,14 +11,14 @@ default_stages: [pre-commit]
 repos:
   # Pin rev to the immutable tag (hooks/vX.Y.Z), never the moving `hooks/v1`.
   - repo: https://github.com/tclavelloux/promy-github-workflows
-    rev: hooks/v1.4.0
+    rev: hooks/v1.11.0
     hooks:
       - id: no-direct-commit-to-main
       - id: py-vuln
       - id: workflow-sync
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       # The manifest declares pre-push on these hooks; default_stages does not override it.
       # Model weights and scraped data stay out of git (see .gitignore).
@@ -27,7 +27,7 @@ repos:
         args: [--maxkb=1024]
 
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.6.0
+    rev: v4.5.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
@@ -45,7 +45,7 @@ repos:
           - revert
 
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.29.1
+    rev: v8.30.1
     hooks:
       - id: gitleaks
 
@@ -78,7 +78,7 @@ repos:
 
   # rev must equal .ruff-version (workflow-sync ruff-version rule); config in ruff.toml.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.0
+    rev: v0.17.3
     hooks:
       # Keep markdown out of scope (ruff 0.17 formats code blocks in *.md by default).
       - id: ruff-check

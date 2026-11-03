@@ -78,7 +78,7 @@ repos:
 
   # rev must equal .ruff-version (workflow-sync ruff-version rule); config in ruff.toml.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.0
+    rev: v0.17.3
     hooks:
       # Keep markdown out of scope (ruff 0.17 formats code blocks in *.md by default).
       - id: ruff-check

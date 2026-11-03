@@ -39,7 +39,7 @@ on:
         description: govulncheck version to install (with or without a leading `v`). MUST equal go-vuln.yml's default; governance CI enforces it, so change both together or not at all.
         required: false
         type: string
-        default: v1.8.0
+        default: v1.9.0
       go-version-file:
         description: Path to the go.mod (or go.work) file used to resolve the Go toolchain version.
         required: false

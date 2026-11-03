@@ -20,12 +20,12 @@ on:
         description: osv-scanner version to install (with or without a leading `v`). The single place the fleet's scanner version is decided. A different version needs its own `osv-scanner-sha256`.
         required: false
         type: string
-        default: 2.6.0
+        default: 2.7.0
       osv-scanner-sha256:
         description: Expected sha256 of the `osv-scanner_linux_amd64` release asset for `osv-scanner-version`. The download is rejected on any mismatch.
         required: false
         type: string
-        default: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+        default: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
       args:
         description: Extra one-off flags appended to `osv-scanner scan source` (e.g. `--format=json`). Word-split without globbing.
         required: false

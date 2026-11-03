@@ -63,12 +63,12 @@ on:
         description: osv-scanner version to install (with or without a leading `v`). MUST equal python-vuln.yml's default; governance CI enforces it, so change both together or not at all. A different version needs its own `osv-scanner-sha256`.
         required: false
         type: string
-        default: 2.6.0
+        default: 2.7.0
       osv-scanner-sha256:
         description: Expected sha256 of the `osv-scanner_linux_amd64` release asset for `osv-scanner-version`. MUST equal python-vuln.yml's default. The download is rejected on any mismatch.
         required: false
         type: string
-        default: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+        default: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
       exclude-dependencies:
         description: Newline- or comma-separated globs of package names this workflow must never move (`torch*`, `numpy`). Names are PEP 503-normalised on both sides and matched whole, so `numpy` does not match `numpy-financial`. Same syntax as dependabot-automerge's input; mirror its list. An excluded advisory goes to the rolling issue.
         required: false
