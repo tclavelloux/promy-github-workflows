@@ -109,7 +109,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | Rule | File | Invariant | Why |
 |---|---|---|---|
 | `no-githooks` | `.githooks/` | No tracked files (`git ls-files`; filesystem check when `--root` is not a git toplevel) | `core.hooksPath` and pre-commit are mutually exclusive |
-| `golangci-version` | `.golangci-version` | Equals `2.13.2` (the `go-lint.yml` default), leading `v` ignored | Local lint equals CI lint |
+| `golangci-version` | `.golangci-version` | Equals `2.15.0` (the `go-lint.yml` default), leading `v` ignored | Local lint equals CI lint |
 | `testcoverage` | `.testcoverage.yml` | Go only. Exists; leading comment block mentions `check-coverage` and `go-coverage.yml` | One file feeds the pre-push hook and CI; the comment says so |
 
 `golangci-version` is Go only as well.
@@ -119,7 +119,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | Rule | File | Invariant | Why |
 |---|---|---|---|
 | `uv-version` | `.uv-version` | Equals `UVVersion` (`0.13.5`), leading `v` ignored | The fleet's uv decision; python-lint ties the uv-pre-commit rev, `[tool.uv] required-version` floors and Dockerfile uv tags to this file |
-| `ruff-version` | `.ruff-version`, `.pre-commit-config.yaml` | `.ruff-version` equals `RuffVersion` (`0.17.0`, the python-lint default); an `astral-sh/ruff-pre-commit` entry exists with `rev: v0.17.0` | Local ruff equals CI ruff. python-lint only warns on this drift; the pinned hook rev makes the bump deliberate |
+| `ruff-version` | `.ruff-version`, `.pre-commit-config.yaml` | `.ruff-version` equals `RuffVersion` (`0.17.3`, the python-lint default); an `astral-sh/ruff-pre-commit` entry exists with `rev: v0.17.3` | Local ruff equals CI ruff. python-lint only warns on this drift; the pinned hook rev makes the bump deliberate |
 | `python-version` | `<project>/.python-version` | Exists in every uv project and starts with `X.Y` | uv, `requires-python` and `FROM python:X.Y` read it; python-lint compares them |
 | `poetry-lock` | any `poetry.lock` | None tracked | uv is the toolchain; a stale lock misleads Dependabot and scanners |
 | `osv-ignore-expiry` | every tracked `osv-scanner.toml` | Each `[[IgnoredVulns]]` has `id`, a non-blank `reason` and an `ignoreUntil` date at most 90 days after today. Each `[[PackageOverrides]]` that ignores vulnerabilities (`ignore = true` or `vulnerability.ignore = true`) needs `reason` and `effectiveUntil` under the same bound. Inline `IgnoredVulns = [...]` arrays are rejected | Python has no reachability analysis, so every ignore must expire and be re-triaged. An expired ignore is not flagged: osv-scanner reports the advisory again and `vuln` goes red on its own. The bound only loosens with time, so a clean commit never turns red later |

@@ -7,7 +7,7 @@ const (
 	GovernanceRepo = "tclavelloux/promy-github-workflows"
 
 	GoTestCoverageVersion = "2.21.0"
-	GolangciLintVersion   = "2.13.2"
+	GolangciLintVersion   = "2.15.0"
 
 	// Python tool versions. Ruff and osv-scanner are decided by the reusable
 	// workflows; uv by this file alone (python-lint reads the caller's .uv-version).
@@ -16,8 +16,8 @@ const (
 	// and pin-drift reports any difference.
 	// The Python profile requires .ruff-version, the ruff-pre-commit rev and
 	// .uv-version to equal these; python-lint ties every other pin to those files.
-	RuffVersion       = "0.17.0" // python-lint.yml ruff-version default
-	OSVScannerVersion = "2.6.0"  // python-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln hook)
+	RuffVersion       = "0.17.3" // python-lint.yml ruff-version default
+	OSVScannerVersion = "2.7.0"  // python-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln hook)
 	UVVersion         = "0.13.5" // fleet uv pin; templates/python/pre-commit-config.yaml uv-pre-commit rev
 
 	// OSVIgnoreMaxDays bounds every osv-scanner ignore: Python has no

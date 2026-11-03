@@ -88,8 +88,8 @@ func TestSyncRulesDrift(t *testing.T) {
 			appendFile(t, r, mkRel, "\ntools:\n\tgo install example.com/foo@latest\n")
 		}, rules: []string{"unpinned-tool"}, msg: "floating version"},
 		{name: "tracked .githooks", do: func(t *testing.T, r string) { writeFile(t, r, ".githooks/pre-commit", "#!/bin/sh\n") }, rules: []string{"no-githooks"}, msg: "mutually exclusive"},
-		{name: "golangci-version 2.12.0", do: func(t *testing.T, r string) { writeFile(t, r, gvRel, "2.12.0\n") }, rules: []string{"golangci-version"}, msg: "2.13.2"},
-		{name: "golangci-version v prefix ok", do: func(t *testing.T, r string) { writeFile(t, r, gvRel, "v2.13.2\n") }},
+		{name: "golangci-version 2.12.0", do: func(t *testing.T, r string) { writeFile(t, r, gvRel, "2.12.0\n") }, rules: []string{"golangci-version"}, msg: "2.15.0"},
+		{name: "golangci-version v prefix ok", do: func(t *testing.T, r string) { writeFile(t, r, gvRel, "v2.15.0\n") }},
 		{name: "golangci-version missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, gvRel)) }, rules: []string{"golangci-version"}, msg: "file missing"},
 		{name: "testcoverage header lacks go-coverage.yml", edits: []edit{ed(tcRel, "go-coverage.yml", "go-cov.yml")}, rules: []string{"testcoverage"}, msg: `"go-coverage.yml"`},
 		{name: "testcoverage header lacks check-coverage", do: func(t *testing.T, r string) {

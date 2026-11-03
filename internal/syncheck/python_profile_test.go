@@ -198,8 +198,8 @@ func TestPythonDrift(t *testing.T) {
 		// repo files
 		{name: "uv-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".uv-version", "0.12.17\n") }, rules: []string{"uv-version"}, msg: "want 0.13.5"},
 		{name: "uv-version missing", do: rm(".uv-version"), rules: []string{"uv-version"}, msg: "file missing"},
-		{name: "ruff-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".ruff-version", "0.16.0\n") }, rules: []string{"ruff-version"}, msg: "want 0.17.0"},
-		{name: "ruff hook rev drift", edits: []edit{ed(pcRel, "rev: v0.17.0", "rev: v0.16.0")}, rules: []string{"ruff-version"}, msg: `rev "v0.16.0"; want v0.17.0`},
+		{name: "ruff-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".ruff-version", "0.16.0\n") }, rules: []string{"ruff-version"}, msg: "want 0.17.3"},
+		{name: "ruff hook rev drift", edits: []edit{ed(pcRel, "rev: v0.17.3", "rev: v0.16.0")}, rules: []string{"ruff-version"}, msg: `rev "v0.16.0"; want v0.17.3`},
 		{name: "ruff hook absent", edits: []edit{ed(pcRel, "https://github.com/astral-sh/ruff-pre-commit", "https://github.com/acme/ruff-fork")}, rules: []string{"ruff-version"}, msg: "no `repo: https://github.com/astral-sh/ruff-pre-commit` entry"},
 		{name: "python-version missing", do: rm("src/worker/.python-version"), rules: []string{"python-version"}, msg: "uv project src/worker"},
 		{name: "python-version garbage", do: func(t *testing.T, r string) { writeFile(t, r, "src/app/.python-version", "latest\n") }, rules: []string{"python-version"}, msg: "X.Y"},

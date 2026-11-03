@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import python_pins as pp  # noqa: E402
 
 PIN = "0.12.18"
-RUFF = "0.17.0"
+RUFF = "0.17.3"
 
 PRECOMMIT = f"""\
 repos:
@@ -215,7 +215,7 @@ class RuffPins(unittest.TestCase):
         f[".pre-commit-config.yaml"] = PRECOMMIT.replace(f"v{RUFF}", "v0.16.0")
         code, out = run(f, "ruff-pins")
         self.assertEqual(code, 1)
-        self.assertIn("rev is v0.16.0, expected v0.17.0", out)
+        self.assertIn("rev is v0.16.0, expected v0.17.3", out)
 
     def test_rev_without_v_prefix_is_a_mismatch(self):
         f = good_tree()
@@ -229,14 +229,14 @@ class RuffPins(unittest.TestCase):
         code, out = run(f, "ruff-pins")
         self.assertEqual(code, 1)
         self.assertIn("file=ruff.toml", out)
-        self.assertIn("not satisfied by .ruff-version 0.17.0", out)
+        self.assertIn("not satisfied by .ruff-version 0.17.3", out)
 
     def test_pin_file_drift(self):
         f = good_tree()
-        f[".ruff-version"] = "0.17.1\n"
+        f[".ruff-version"] = "0.17.4\n"
         code, out = run(f, "ruff-pins")
         self.assertEqual(code, 1)
-        self.assertEqual(len(errors(out)), 1, out)  # hook rev; floor >=0.17.0 still satisfied
+        self.assertEqual(len(errors(out)), 1, out)  # hook rev; floor >=0.17.3 still satisfied
 
     def test_missing_ruff_version(self):
         f = good_tree()
@@ -279,7 +279,7 @@ class RuffPins(unittest.TestCase):
         code, out = run(good_tree(), "ruff-pins", "--workflow-version", "0.18.0")
         self.assertEqual((code, errors(out)), (0, []), out)
         self.assertIn("::warning file=.ruff-version", out)
-        code, out = run(good_tree(), "ruff-pins", "--workflow-version", "v0.17.0")
+        code, out = run(good_tree(), "ruff-pins", "--workflow-version", "v0.17.3")
         self.assertNotIn("::warning", out)
 
 
