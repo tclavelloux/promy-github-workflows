@@ -12,7 +12,7 @@
 | Go vuln fix | `.github/workflows/go-vuln-fix.yml`, `templates/go-vuln-fix-caller.yml` | `go-vuln-fix/v1` | Called advisories wait for a human to notice |
 | Python vuln fix | `.github/workflows/python-vuln-fix.yml`, `templates/python/vuln-fix.yml` | `python-vuln-fix/v1` | OSV-only advisories (PYSEC, no GHSA) that Dependabot's `uv-security` group never fixes |
 | Pre-push hooks | `hooks/go-vuln.sh`, `hooks/py-vuln.sh`, `.pre-commit-hooks.yaml` | `hooks/vX.Y.Z` | Advisories surface only after push |
-| Local twins and CI guard | `scripts/go-vuln-fix.sh`, `scripts/python_vuln_fix.py`, `.github/workflows/ci.yml`, `internal/syncheck/python_workflows_test.go` | none | Version and fix-logic drift |
+| Local twins and CI guard | `scripts/go-vuln-fix.sh`, `scripts/go-vuln-gate.sh`, `scripts/python_vuln_fix.py`, `.github/workflows/ci.yml`, `internal/syncheck/python_workflows_test.go`, `internal/syncheck/go_vuln_gate_test.go` | none | Version and fix-logic drift |
 
 ## Automerge gate
 
@@ -101,8 +101,23 @@ Shared by `go-vuln-fix` and `python-vuln-fix`:
 - Module findings: group by module, take the highest `fixed_version`, `go get`, `go mod tidy`, `go build ./...`, rescan. A fix that would change the `go` or `toolchain` directive goes to the issue.
 - Go patch bump (`go-patch-bump`, default on): a called stdlib/toolchain advisory fixed in a newer patch of the `go` directive's minor (`go 1.26.8` -> `1.26.9`) bumps the directive in the same PR. Tidy, build and rescan run with `GOTOOLCHAIN=go<target>`; any claimed ID still called aborts and restores `go.mod`/`go.sum`. Minor bumps stay human.
 - Patch bump refused (advisory goes to the issue): other minors, no fixed version, a `toolchain` directive, `go.work`, `.go-version`, a Go line in `.tool-versions`, a Dockerfile pinning `golang:X.Y.Z` or `@sha256:` (official images set `GOTOOLCHAIN=local`, so they cannot build a newer patch). Minor-tag Dockerfiles (`golang:1.26`) pass `go-docker.yml` and pick up the patch on rebuild. Dockerfiles are never edited.
+- `go-vuln.yml` accepts named no-fix module advisories until a dated expiry (README `go-vuln.yml`). The list hides nothing here: those findings still open the rolling issue.
 - Uncovered stdlib/toolchain findings and module findings with no fix: one rolling issue per repo, marker `<!-- go-vuln-fix:stdlib -->`, with the refusal reason.
 - The govulncheck version lives in `.govulncheck-version`, `go-vuln.yml` and `go-vuln-fix.yml`, and the fix body in the workflow and `scripts/go-vuln-fix.sh`: a reusable workflow cannot check out its own files at its pinned ref. `ci.yml` asserts both stay in sync.
+
+### Accepting an advisory
+
+`go-vuln.yml` accepts a called advisory with no fix for a dated window. One fleet-wide list: `GO_VULN_ACCEPT` on the scan step.
+
+1. Confirm no fix exists: govulncheck prints `Fixed in: N/A`, and the module's upstream releases ship none.
+2. Confirm the affected feature is unused in every Go repo's code and in its Yokai setup (`configs/*.yaml`, `fxhttpserver` defaults). Record the evidence as `path:line`. Evidence of use: fix or remove the feature instead.
+3. Open or reuse a tracking issue in `promy-github-workflows`; put the evidence there.
+4. Add one line to `GO_VULN_ACCEPT` in `.github/workflows/go-vuln.yml`: `<GO-ID> <expires YYYY-MM-DD> <issue URL> <reason>`. Expiry at most 90 days out; `go_vuln_gate_test.go` rejects more.
+5. Open the PR and merge it.
+6. Tag the next immutable `go-vuln/v1.x.y`. The maintainer moves the floating `go-vuln/v1`; agents cannot move tags.
+7. Optional: cut `hooks/vX.Y.Z` and bump `rev:` in each Go repo so the pre-push hook sees the entry. Without it, the hook blocks only pushes that change `go.mod` or `go.sum`.
+8. Renew or delete the entry before the 14-day `expiring` warning window ends; on expiry every Go PR's `vuln` turns red.
+9. Delete the entry once a fix ships and the summary shows `not reached`.
 
 ### `python-vuln-fix`
 
