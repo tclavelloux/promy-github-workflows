@@ -44,6 +44,13 @@ updates:
       include: scope
     cooldown:
       default-days: 3
+    # Hold echo at 4.16.2: v4.16.3 carries GO-2026-6875 and GO-2026-6872 with
+    # no fix, which turns `vuln / vuln` red on the whole gomod group.
+    # Lift when echo ships a release clearing both:
+    # https://github.com/tclavelloux/promy-github-workflows/issues/74
+    ignore:
+      - dependency-name: github.com/labstack/echo/v4
+        versions: ["4.16.3"]
     groups:
       gomod:
         applies-to: version-updates

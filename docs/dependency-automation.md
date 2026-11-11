@@ -99,6 +99,7 @@ Shared by `go-vuln-fix` and `python-vuln-fix`:
 - `dependency-type: all` covers indirect modules (`direct` never bumps them).
 - `cooldown: 3` delays version updates, not security updates. `go-vuln-fix` ignores cooldown.
 - Dependabot security updates and vulnerability alerts are on in every repo (`scripts/check-repo-settings.sh` checks); the `gomod-security` group is in the template.
+- `ignore` holds `github.com/labstack/echo/v4` at 4.16.2 (`versions: ["4.16.3"]`; GO-2026-6875, GO-2026-6872, no fix). Lift trigger: [issue #74](https://github.com/tclavelloux/promy-github-workflows/issues/74). `workflow-sync` does not compare `ignore` blocks.
 
 ## Limitations
 
