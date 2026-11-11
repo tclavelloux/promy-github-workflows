@@ -44,6 +44,40 @@ Under a strict ruleset a sibling PR merged first leaves the next one behind; Git
 - Rejected: `gh pr merge --auto` (`allow_auto_merge: false` fleet-wide); `update-branch` with `GITHUB_TOKEN` (its push starts no CI, the PR sticks).
 - Step summary row `Rebase request`: `acknowledged`, `unacknowledged`, `comment-failed`, `no-app`, `not-applicable`.
 
+## Excluded dependencies
+
+`exclude-dependencies` is a caller input: workflow-sync does not govern it, each repo owns its list. Majors never automerge whatever the list says.
+
+promy-market-catalog (`src/leaflet`), the only Python caller:
+
+| Pattern | Automerge | Why |
+|---|---|---|
+| `torch*` | never | CPU-only wheels from the `pytorch-cpu` index; torch and torchvision pin each other exactly; CI skips `model` tests (no weights), so inference is never exercised |
+| `opencv*` | never | Native image I/O used by the YOLO crops; same `model`-test gap |
+| `numpy` | never | ABI floor for torch, opencv and ultralytics wheels; a minor can break a compiled extension at import or at inference only |
+| `ultralytics*` | patch and minor | Pure-Python wrapper over torch; YOLO weights are not in the image yet (promy-market-catalog#125), so a regression degrades crops to the OpenAI-coordinate fallback instead of failing the job |
+| `openai` | patch and minor | SDK with semver discipline; CI mocks HTTP (`--disable-socket`) and never calls OpenAI |
+
+Residual risk of automerging `ultralytics` and `openai` minors: CI proves install, import and the mocked unit tests only. A behavioural regression (detection output, request/response shape, TLS) ships unnoticed until the next leaflet run. Known precedent: openai 3.x verifies TLS against the OS CA store, not certifi; an image without `ca-certificates` fails every call with `CERTIFICATE_VERIFY_FAILED`, and CI cannot see it (ARCHITECTURE.md Phase 2.D). Watch the first leaflet run after each such merge.
+
+Grouped PRs: one excluded name refuses the whole PR. Keep `openai` and `ultralytics*` out of the Dependabot group that carries `torch*`, `opencv*`, `numpy`, or the group stays manual.
+
+Never merges:
+
+- Major bumps, even if listed in `merge-update-types`.
+- `github-actions` bumps: `GITHUB_TOKEN` cannot merge workflow-file changes. A human merges that group.
+- release-please PRs.
+- Anything a human touched (extra commit, other author).
+- A `python-vuln-fix` PR whose resolver also moved another package by a minor (listed under "Also moved by the resolver"): refused, waits for a human.
+
+Refusal: exit 0, `::notice` and step summary; a red check would duplicate the real failure.
+
+The bot allowlist lives in the caller's `if:` (`AutomergeIf` in `policy.go`, rule `ci-automerge`), mirrored in the reusable job's `if:`. A repo without an automerge job gets nothing; add it from `templates/ci-automerge-job.yml`.
+
+Trigger: a job inside the caller's `ci.yml`, so "all jobs succeeded" is native and human PRs skip it for free. Rejected: `pull_request_target` and `workflow_run` (zizmor `dangerous-triggers`; fetch-metadata reads only `pull_request` payloads), `check_suite` (never fires for suites created by Actions), a standalone poller (burns minutes).
+
+The squash commit is pushed by `GITHUB_TOKEN`, so it starts no workflows: release-please's PR refreshes on the next human merge. Nothing is lost; release-please scans every commit since the last release and `build(deps)` is non-releasing.
+
 ## Vuln fix
 
 Shared by `go-vuln-fix` and `python-vuln-fix`:
