@@ -121,7 +121,8 @@ Fails on any **called** vulnerability (reachable from the caller's code, not mer
 - Fails on any called advisory except an unexpired entry of the accepted list. A scanner or list error also fails (fail closed).
 - Accepted list: literal `GO_VULN_ACCEPT` env on the scan step in `go-vuln.yml`. Not an input, so callers cannot widen it. No per-repo list.
 - Entry: `<GO-ID> <expires YYYY-MM-DD> <issue URL> <reason>`, one per line. Expiry at most 90 days ahead (`internal/syncheck/go_vuln_gate_test.go`). Valid through the expiry date (UTC).
-- Accepted IDs print as `::notice` and in the step summary table "Accepted advisories". An expired entry turns `vuln` red again.
+- Accepted IDs print as `::notice` and in the step summary table "Accepted advisories". Within 14 days of expiry (expiry day included) they print `::warning` with status `expiring`; the job stays green. An expired entry turns `vuln` red again.
+- Runbook: [Accepting an advisory](docs/dependency-automation.md#accepting-an-advisory).
 - Add, renew or remove an entry only by PR to `go-vuln.yml`, then tag a new `go-vuln/v1.x.y` and move `go-vuln/v1`.
 - Precondition for an entry: evidence that the affected feature is unused in repo code and in Yokai's setup, and a tracking issue.
 - Never list a stdlib advisory that has a fix: `go-vuln-fix` bumps the `go` directive.

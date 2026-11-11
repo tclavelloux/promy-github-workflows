@@ -105,6 +105,20 @@ Shared by `go-vuln-fix` and `python-vuln-fix`:
 - Uncovered stdlib/toolchain findings and module findings with no fix: one rolling issue per repo, marker `<!-- go-vuln-fix:stdlib -->`, with the refusal reason.
 - The govulncheck version lives in `.govulncheck-version`, `go-vuln.yml` and `go-vuln-fix.yml`, and the fix body in the workflow and `scripts/go-vuln-fix.sh`: a reusable workflow cannot check out its own files at its pinned ref. `ci.yml` asserts both stay in sync.
 
+### Accepting an advisory
+
+`go-vuln.yml` accepts a called advisory with no fix for a dated window. One fleet-wide list: `GO_VULN_ACCEPT` on the scan step.
+
+1. Confirm no fix exists: govulncheck prints `Fixed in: N/A`, and the module's upstream releases ship none.
+2. Confirm the affected feature is unused in every Go repo's code and in its Yokai setup (`configs/*.yaml`, `fxhttpserver` defaults). Record the evidence as `path:line`. Evidence of use: fix or remove the feature instead.
+3. Open or reuse a tracking issue in `promy-github-workflows`; put the evidence there.
+4. Add one line to `GO_VULN_ACCEPT` in `.github/workflows/go-vuln.yml`: `<GO-ID> <expires YYYY-MM-DD> <issue URL> <reason>`. Expiry at most 90 days out; `go_vuln_gate_test.go` rejects more.
+5. Open the PR and merge it.
+6. Tag the next immutable `go-vuln/v1.x.y`. The maintainer moves the floating `go-vuln/v1`; agents cannot move tags.
+7. Optional: cut `hooks/vX.Y.Z` and bump `rev:` in each Go repo so the pre-push hook sees the entry. Without it, the hook blocks only pushes that change `go.mod` or `go.sum`.
+8. Renew or delete the entry before the 14-day `expiring` warning window ends; on expiry every Go PR's `vuln` turns red.
+9. Delete the entry once a fix ships and the summary shows `not reached`.
+
 ### `python-vuln-fix`
 
 - Per project, scan `uv.lock` (config lookup as in `python-vuln.yml`). Target per package: the highest of the lowest fixed versions across its advisory groups, from OSV `ECOSYSTEM` ranges containing the installed version (`GIT` ranges ignored).
