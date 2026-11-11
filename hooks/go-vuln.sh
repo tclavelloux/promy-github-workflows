@@ -2,7 +2,9 @@
 # Runs govulncheck with the fleet-pinned version and CI's Go toolchain.
 #
 # Mirrors the reusable `go-vuln.yml` workflow locally so `make vuln` and pre-push
-# fail on the same findings CI would.
+# fail on the same findings CI would: it runs scripts/go-vuln-gate.sh with the
+# accepted-advisory list extracted from .github/workflows/go-vuln.yml, so an
+# unexpired accepted no-fix advisory does not block and an expired one does.
 #
 # Why warn vs block: advisories are time-dependent. A push that does not touch
 # go.mod/go.sum must not be blocked by an advisory published today, but a push that
@@ -108,8 +110,17 @@ if [ ! -x "$bin" ]; then
 fi
 
 # --- run -------------------------------------------------------------------
+# gate rc: 0 clean or only accepted, 1 called advisory (old govulncheck rc 3),
+# 2 scanner or list error. Map 1 to the old rc 3 so the branches below stay as-is.
+gate="$script_dir/../scripts/go-vuln-gate.sh"
 rc=0
-"$bin" ./... || rc=$?
+if accept=$(bash "$gate" accept-from-workflow "$script_dir/../.github/workflows/go-vuln.yml"); then
+  GO_VULN_ACCEPT="$accept" bash "$gate" "$bin" ./... || rc=$?
+  [ "$rc" -eq 1 ] && rc=3
+else
+  msg "cannot read the accepted-advisory list from go-vuln.yml"
+  rc=2
+fi
 
 if [ "$rc" -eq 0 ]; then
   exit 0
