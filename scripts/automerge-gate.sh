@@ -212,4 +212,26 @@ fleet_gate() {
   printf 'patch-level bumps within the same minor, verified from the diff (%s): %s' "$ECOSYSTEM" "$summary"
   return 0
 }
+# Dependabot uv PRs: the excluded-name check also covers what the resolver moved.
+# dependency-names lists only the packages Dependabot asked for; an `ultralytics`
+# bump can drag `torch` or `numpy` along in uv.lock without naming them.
+# Reads FLEET_FILES, BASE_DIR, HEAD_DIR, EXCLUDE. Prints the refusal reason and
+# returns 1 when a package matching EXCLUDE moved, was added or was removed.
+check_lock_excluded() {
+  local status file tag kd name old new DEPENDENCIES="" reason
+  while IFS=$'\t' read -r status file; do
+    [ -n "$file" ] || continue
+    [ "${file##*/}" = uv.lock ] || continue
+    if [ "$status" != "modified" ]; then echo "'$file' is $status; cannot check excluded dependencies"; return 1; fi
+    while IFS=$'\t' read -r tag kd name old new; do
+      case "$tag" in
+        BUMP) DEPENDENCIES="${DEPENDENCIES:+$DEPENDENCIES, }$name" ;;
+        ERR) DEPENDENCIES="${DEPENDENCIES:+$DEPENDENCIES, }${kd%% *}" ;;
+      esac
+    done < <(manifest_diff <(manifest_entries "$file" "$BASE_DIR/$file") <(manifest_entries "$file" "$HEAD_DIR/$file"))
+  done <<< "$FLEET_FILES"
+  [ -n "$DEPENDENCIES" ] || return 0
+  if ! reason="$(check_excluded)"; then echo "uv.lock: $reason"; return 1; fi
+  return 0
+}
 # <<< automerge-gate body

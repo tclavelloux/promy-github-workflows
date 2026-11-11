@@ -38,3 +38,9 @@ jobs:
       actions: read
       statuses: read
     uses: tclavelloux/promy-github-workflows/.github/workflows/dependabot-automerge.yml@dependabot-automerge/v1
+    # Optional. With them, a Dependabot PR left behind its base under a strict
+    # ruleset gets an App-authored `@dependabot rebase` comment; without them the
+    # job only prints a notice. Map explicitly; never `secrets: inherit`.
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

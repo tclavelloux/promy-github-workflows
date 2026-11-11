@@ -1,6 +1,6 @@
 # Dependency and vulnerability automation
 
-- No PAT, by choice. Everything runs on `GITHUB_TOKEN`, except vuln-fix and release PRs: the fleet GitHub App (`promy-fleet-bot`) opens them so CI runs.
+- No PAT, by choice. Everything runs on `GITHUB_TOKEN`, except vuln-fix and release PRs and the automerge rebase request: the fleet GitHub App (`promy-fleet-bot`) opens or comments on them so CI runs.
 - Ruleset `protect-main` on every repo: PR required, squash only, required checks (including `lint / lint`, which carries `workflow-sync`), Admin-only bypass.
 
 ## Pieces
@@ -23,11 +23,44 @@ Merges only when all hold:
 - Ecosystem is in `ecosystems` (`[a-z_-]` only; anything else refuses every PR).
 - Dependabot: update type is in `merge-update-types` (`dependabot/fetch-metadata`, SHA-pinned).
 - No dependency name matches `exclude-dependencies`: `*` `?` globs, case-insensitive, `.` `_` `-` equivalent, whole-name (`numpy` does not match `numpy-financial`). One match refuses the whole PR, grouped or not. Non-empty with no `dependency-names` fails closed.
+- Dependabot uv PRs with a non-empty `exclude-dependencies`: no package matching it moved, was added or was removed in any `uv.lock` (merge base vs head). `dependency-names` lists only what Dependabot asked for; an `ultralytics` bump can drag `torch` or `numpy` along. An added or removed `uv.lock` refuses.
 - Every commit on the PR is authored by the PR's own bot, not only the first one.
 - Each bot is tied to its branches: `dependabot/*` for Dependabot; `fix/vuln-*` (`go_modules`) and `fix/py-vuln-*` (`uv`) for `promy-fleet-bot[bot]`. A `GITHUB_TOKEN` PR (`github-actions[bot]`) never matches.
 - Fleet-bot PRs: the decision reads the diff (merge base vs head), not the title or body; fetch-metadata is skipped and `merge-update-types` does not apply. Every changed file is a modified `go.mod`, `go.sum` or `uv.lock` (not added, not renamed); same set of requirements; at least one bump; every version moves within the same major.minor, never down (`go` directive included); no pre-release or pseudo-version; no other changed line (`replace`, `exclude`, `toolchain`).
 - Every other check run on the head SHA is `completed` with `success`, `neutral` or `skipped`; no commit status is `failure`, `error` or `pending`. Polls `wait-attempts` x `wait-seconds` for runs outside this workflow (e.g. `pr-title.yml`).
 - Head SHA unchanged at merge (`gh pr merge --squash --match-head-commit`).
+- Branch not behind its base when the base's ruleset requires up-to-date branches (`strict_required_status_checks_policy`, read from `rules/branches/<base>`; a failed lookup counts as strict). Checked before Verify (`compare/<base>...<head>`, `behind_by`).
+
+## Stale branches
+
+Under a strict ruleset a sibling PR merged first leaves the next one behind; GitHub refuses its merge with `Repository rule violations found` / `N of N required status checks are expected`. Only promy-market-catalog has a strict ruleset today.
+
+- Behind before the merge: job ends green, `::notice` `branch behind base by N commit(s) ...`, Verify and Merge skipped.
+- Merge refused anyway (a sibling merged during Verify): job ends green. Behind base now: `::notice`, then the rebase request. Any other refusal: `::warning` with the GitHub error, no rebase.
+- Rebase request, Dependabot PRs: with `APP_CLIENT_ID` and `APP_PRIVATE_KEY` mapped into the job, `actions/create-github-app-token` mints a token scoped to the calling repo with `pull-requests: write` only, and the App comments `@dependabot rebase`. The step then polls 6 x 10 s for Dependabot's +1 reaction: `Rebase requested` notice when acknowledged, `Rebase not acknowledged` warning otherwise. A failed mint fails the job; a refused comment is a warning.
+- Without the App secrets: notice only (`comment @dependabot rebase by hand`). A `GITHUB_TOKEN` comment is not used: it is not honoured.
+- Fleet-bot PRs: notice only. Nothing rebases a `fix/vuln-*` branch, and `gh pr update-branch` by a human adds a commit the gate refuses: a human merges it.
+- Dependabot's rebase push starts CI, which re-enters the job; the loop ends when the PR merges or a check fails.
+- Rejected: `gh pr merge --auto` (`allow_auto_merge: false` fleet-wide); `update-branch` with `GITHUB_TOKEN` (its push starts no CI, the PR sticks).
+- Step summary row `Rebase request`: `acknowledged`, `unacknowledged`, `comment-failed`, `no-app`, `not-applicable`.
+
+## Excluded dependencies
+
+`exclude-dependencies` is a caller input: workflow-sync does not govern it, each repo owns its list. Majors never automerge whatever the list says.
+
+promy-market-catalog (`src/leaflet`), the only Python caller:
+
+| Pattern | Automerge | Why |
+|---|---|---|
+| `torch*` | never | CPU-only wheels from the `pytorch-cpu` index; torch and torchvision pin each other exactly; CI skips `model` tests (no weights), so inference is never exercised |
+| `opencv*` | never | Native image I/O used by the YOLO crops; same `model`-test gap |
+| `numpy` | never | ABI floor for torch, opencv and ultralytics wheels; a minor can break a compiled extension at import or at inference only |
+| `ultralytics*` | patch and minor | Pure-Python wrapper over torch; YOLO weights are not in the image yet (promy-market-catalog#125), so a regression degrades crops to the OpenAI-coordinate fallback instead of failing the job |
+| `openai` | patch and minor | SDK with semver discipline; CI mocks HTTP (`--disable-socket`) and never calls OpenAI |
+
+Residual risk of automerging `ultralytics` and `openai` minors: CI proves install, import and the mocked unit tests only. A behavioural regression (detection output, request/response shape, TLS) ships unnoticed until the next leaflet run. Known precedent: openai 3.x verifies TLS against the OS CA store, not certifi; an image without `ca-certificates` fails every call with `CERTIFICATE_VERIFY_FAILED`, and CI cannot see it (ARCHITECTURE.md Phase 2.D). Watch the first leaflet run after each such merge.
+
+Grouped PRs: one excluded name refuses the whole PR. Keep `openai` and `ultralytics*` out of the Dependabot group that carries `torch*`, `opencv*`, `numpy`, or the group stays manual.
 
 Never merges:
 
@@ -104,6 +137,7 @@ Shared by `go-vuln-fix` and `python-vuln-fix`:
 
 - `GITHUB_TOKEN`-created PRs and merges start no workflows.
 - Release-please, `[skip ci]` and vuln-fix PRs opened without the App report no checks and need `gh pr merge --admin`.
+- Dependabot's docs do not say whether it honours a command authored by a GitHub App; the +1-reaction poll reports it per run.
 - `automerge` is not a required check; `protect-main` enforces the required checks in addition to the gate's own verification.
 - A `workflow_dispatch` trigger is not a no-PAT workaround: with no PR payload, `github.event.pull_request.draft == false` skips every job, and coverage's PR comment breaks.
 
@@ -114,7 +148,7 @@ One PR, titled `ci: automate dependency bumps and vuln fixes`:
 1. Replace `.github/dependabot.yml` with the profile's template (`templates/dependabot.yml`, `templates/python/dependabot.yml`).
 2. Append `templates/ci-automerge-job.yml` to `ci.yml`, with every other job in `needs:`.
 3. Add `.github/workflows/vuln-fix.yml` from `templates/go-vuln-fix-caller.yml` or `templates/python/vuln-fix.yml`.
-4. Install the fleet App on the repo and add `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repo secrets. Skip it and fix PRs run no CI.
+4. Install the fleet App on the repo and add `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repo secrets; map them into the `vuln-fix` and `automerge` jobs. Skip it and fix PRs run no CI, and stale Dependabot PRs wait for a human `@dependabot rebase`.
 5. `.pre-commit-config.yaml`: latest immutable `hooks/vX.Y.Z`, `- id: go-vuln` or `- id: py-vuln`, plus the `vuln:` target (`templates/Makefile.vuln.mk` or `templates/python/Makefile`).
 6. Merge with the keyring token: `GH_TOKEN= gh pr merge --squash`.
 

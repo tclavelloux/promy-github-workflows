@@ -20,6 +20,8 @@ name: Dependabot Automerge
 #   exclude-dependencies newline- or comma-separated globs (`torch*`, `numpy`);
 #                        one matching dependency-name refuses the whole (grouped)
 #                        PR. Case-insensitive; `.` `_` `-` are equivalent. Default none.
+#                        uv PRs: a matching package moved, added or removed in
+#                        any uv.lock (a resolver drag-along) refuses it too.
 #   wait-attempts / wait-seconds   poll budget for check runs outside this run.
 # The gate logic is scripts/automerge-gate.sh, inlined below (a reusable workflow
 # cannot read its own files at the caller's pinned ref).
@@ -34,6 +36,15 @@ name: Dependabot Automerge
 # A fleet-bot PR reaches this job only because the App token opened it (a
 # GITHUB_TOKEN PR starts no workflows).
 #   - check_suite: never fires for suites created by GitHub Actions.
+#
+# Stale branches: when the base branch's ruleset requires branches to be up to
+# date (strict required status checks) and the head is behind the base (a
+# sibling PR merged first), the merge would be refused. The job ends green with
+# a notice instead and, for a Dependabot PR, comments `@dependabot rebase` with
+# a promy-fleet-bot App token (optional APP_CLIENT_ID / APP_PRIVATE_KEY
+# secrets). Dependabot's rebase push re-runs CI, which re-enters this job. A
+# merge that still fails (a sibling merged during Verify) is caught the same way.
+# Without the App secrets the job only prints the notice: a human comments.
 #
 # GITHUB_TOKEN consequence: the squash commit is pushed by GITHUB_TOKEN, so it
 # starts no workflows. release-please's `push: main` run does not fire until the
@@ -68,6 +79,13 @@ on:
         required: false
         type: number
         default: 15
+    secrets:
+      APP_CLIENT_ID:
+        description: Client ID of the fleet GitHub App (promy-fleet-bot), installed on the repository. With APP_PRIVATE_KEY, a stale Dependabot PR gets an App-authored `@dependabot rebase` comment.
+        required: false
+      APP_PRIVATE_KEY:
+        description: Private key of that GitHub App.
+        required: false
 
 # The caller's automerge job must grant exactly these: a called workflow can
 # only narrow the caller's permissions, never widen them.
@@ -81,7 +99,11 @@ permissions:
 jobs:
   automerge:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    # Verify polls up to 150 s by default; the rebase acknowledgement up to 60 s.
+    timeout-minutes: 8
+    env:
+      # Secrets cannot be read in a step `if:`; expose whether both are set.
+      HAS_APP: ${{ secrets.APP_CLIENT_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
     # Same-repo bot branches only. A fork PR can spoof neither the user login nor
     # a head repo equal to this one. Each bot is bound to its own branch prefixes.
     if: >-
@@ -334,7 +356,55 @@ jobs:
             printf 'patch-level bumps within the same minor, verified from the diff (%s): %s' "$ECOSYSTEM" "$summary"
             return 0
           }
+          # Dependabot uv PRs: the excluded-name check also covers what the resolver moved.
+          # dependency-names lists only the packages Dependabot asked for; an `ultralytics`
+          # bump can drag `torch` or `numpy` along in uv.lock without naming them.
+          # Reads FLEET_FILES, BASE_DIR, HEAD_DIR, EXCLUDE. Prints the refusal reason and
+          # returns 1 when a package matching EXCLUDE moved, was added or was removed.
+          check_lock_excluded() {
+            local status file tag kd name old new DEPENDENCIES="" reason
+            while IFS=$'\t' read -r status file; do
+              [ -n "$file" ] || continue
+              [ "${file##*/}" = uv.lock ] || continue
+              if [ "$status" != "modified" ]; then echo "'$file' is $status; cannot check excluded dependencies"; return 1; fi
+              while IFS=$'\t' read -r tag kd name old new; do
+                case "$tag" in
+                  BUMP) DEPENDENCIES="${DEPENDENCIES:+$DEPENDENCIES, }$name" ;;
+                  ERR) DEPENDENCIES="${DEPENDENCIES:+$DEPENDENCIES, }${kd%% *}" ;;
+                esac
+              done < <(manifest_diff <(manifest_entries "$file" "$BASE_DIR/$file") <(manifest_entries "$file" "$HEAD_DIR/$file"))
+            done <<< "$FLEET_FILES"
+            [ -n "$DEPENDENCIES" ] || return 0
+            if ! reason="$(check_excluded)"; then echo "uv.lock: $reason"; return 1; fi
+            return 0
+          }
           # <<< automerge-gate body
+
+          # Downloads each modified go.mod / uv.lock of the PR at the merge base and
+          # at the head into BASE_DIR / HEAD_DIR and exports FLEET_FILES. The base
+          # side is the merge base, so a base branch that moved on cannot fake a diff.
+          fetch_manifests() {
+            local file status merge_base
+            export BASE_DIR="$RUNNER_TEMP/manifests/base" HEAD_DIR="$RUNNER_TEMP/manifests/head"
+            FLEET_FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate -q '.[] | [.status, .filename] | @tsv')"
+            export FLEET_FILES
+            merge_base="$(gh api "repos/$REPO/compare/$BASE_SHA...$HEAD_SHA" -q .merge_base_commit.sha)"
+            while IFS=$'\t' read -r status file; do
+              [ -n "$file" ] || continue
+              # Same path rule as fleet_gate, which refuses anything else.
+              if ! printf '%s' "$file" | grep -Eq '^[A-Za-z0-9._/-]+$' || [[ "$file" == /* || "$file" == *..* ]]; then
+                reject "unexpected file path '$file'"
+              fi
+              [ "$status" = "modified" ] || continue
+              case "${file##*/}" in
+                go.mod | uv.lock)
+                  mkdir -p "$BASE_DIR/$(dirname "$file")" "$HEAD_DIR/$(dirname "$file")"
+                  gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$merge_base" > "$BASE_DIR/$file"
+                  gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$HEAD_SHA" > "$HEAD_DIR/$file"
+                  ;;
+              esac
+            done <<< "$FLEET_FILES"
+          }
 
           # The PR opener must be allowlisted (the job `if:` is the first line of
           # defence) and every commit must be authored by that same actor.
@@ -343,30 +413,17 @@ jobs:
               if ! reason="$(gate)"; then
                 reject "$reason"
               fi
+              if [ "$ECOSYSTEM" = "uv" ] && [ -n "$(printf '%s' "$EXCLUDE" | tr -d '[:space:],')" ]; then
+                fetch_manifests
+                if ! reason="$(check_lock_excluded)"; then
+                  reject "$reason"
+                fi
+              fi
               merge_reason="$UPDATE_TYPE on $ECOSYSTEM, all commits by $ACTOR"
               ;;
             "promy-fleet-bot[bot]")
-              # fetch-metadata does not apply: read the diff itself. The base side
-              # is the merge base, so a base branch that moved on cannot fake a diff.
-              base_dir="$RUNNER_TEMP/fleet/base"
-              head_dir="$RUNNER_TEMP/fleet/head"
-              FLEET_FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate -q '.[] | [.status, .filename] | @tsv')"
-              merge_base="$(gh api "repos/$REPO/compare/$BASE_SHA...$HEAD_SHA" -q .merge_base_commit.sha)"
-              while IFS=$'\t' read -r _ file; do
-                # Same path rule as fleet_gate, which refuses anything else.
-                if ! printf '%s' "$file" | grep -Eq '^[A-Za-z0-9._/-]+$' || [[ "$file" == /* || "$file" == *..* ]]; then
-                  reject "unexpected file path '$file'"
-                fi
-                case "${file##*/}" in
-                  go.mod | uv.lock)
-                    mkdir -p "$base_dir/$(dirname "$file")" "$head_dir/$(dirname "$file")"
-                    gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$merge_base" > "$base_dir/$file"
-                    gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$HEAD_SHA" > "$head_dir/$file"
-                    ;;
-                esac
-              done <<< "$FLEET_FILES"
-              export FLEET_FILES
-              export BASE_DIR="$base_dir" HEAD_DIR="$head_dir"
+              # fetch-metadata does not apply: read the diff itself.
+              fetch_manifests
               if ! merge_reason="$(fleet_gate)"; then
                 reject "$merge_reason"
               fi
@@ -393,9 +450,49 @@ jobs:
             echo "reason=$merge_reason"
           } >> "$GITHUB_OUTPUT"
 
+      # Under a strict ruleset a branch behind its base cannot merge: GitHub
+      # answers "N of N required status checks are expected". Ask for a rebase
+      # instead of waiting on checks that will never count.
+      - name: Check branch is up to date
+        id: fresh
+        if: steps.decide.outputs.merge == 'true'
+        env:
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          base="$(jq -rn --arg s "$BASE_REF" '$s | @uri')"
+          # Rulesets only (classic branch protection needs admin to read). A
+          # lookup failure counts as strict: a needless rebase costs one CI run.
+          if rules="$(gh api "repos/$REPO/rules/branches/$base" --paginate \
+            --jq '.[] | select(.type == "required_status_checks") | .parameters.strict_required_status_checks_policy')"; then
+            strict="$(printf '%s\n' "$rules" | grep -c '^true$' || true)"
+          else
+            strict=1
+          fi
+          behind="$(gh api "repos/$REPO/compare/$base...$HEAD_SHA" --jq .behind_by || true)"
+          if ! [[ "$behind" =~ ^[0-9]+$ ]]; then
+            echo "::warning title=Freshness unknown::could not compare $BASE_REF with the head commit; merging anyway (--match-head-commit and the ruleset still guard it)"
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$behind" -gt 0 ] && [ "$strict" -gt 0 ]; then
+            reason="branch behind base by $behind commit(s) and the ruleset requires up-to-date branches"
+            echo "::notice title=Not auto-merging::$reason"
+            {
+              echo "stale=true"
+              echo "reason=$reason"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Branch is $behind commit(s) behind $BASE_REF; strict up-to-date rule active: $strict"
+          echo "stale=false" >> "$GITHUB_OUTPUT"
+
       - name: Verify checks
         id: verify
-        if: steps.decide.outputs.merge == 'true'
+        if: steps.decide.outputs.merge == 'true' && steps.fresh.outputs.stale == 'false'
         env:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -465,9 +562,103 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         # --match-head-commit refuses the merge if the branch moved after the
-        # checks above ran (e.g. a Dependabot rebase or a human push).
-        run: gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --match-head-commit "$HEAD_SHA"
+        # checks above ran (e.g. a Dependabot rebase or a human push). A refused
+        # merge ends green with a notice: a sibling merged during Verify is the
+        # common cause, and a red job would only repeat what the PR shows.
+        run: |
+          set -euo pipefail
+          if out="$(gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --match-head-commit "$HEAD_SHA" 2>&1)"; then
+            printf '%s\n' "$out"
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$out" >&2
+          # One line, no workflow-command characters, bounded length.
+          err="$(printf '%s' "$out" | tr '\r\n' '  ' | tr -d '%' | cut -c1-300)"
+          base="$(jq -rn --arg s "$BASE_REF" '$s | @uri')"
+          behind="$(gh api "repos/$REPO/compare/$base...$HEAD_SHA" --jq .behind_by || true)"
+          if [[ "$behind" =~ ^[0-9]+$ ]] && [ "$behind" -gt 0 ]; then
+            reason="merge refused and branch now behind base by $behind commit(s) ($err)"
+            echo "::notice title=Not auto-merging::$reason"
+            stale=true
+          else
+            reason="merge refused ($err)"
+            echo "::warning title=Not auto-merging::$reason"
+            stale=false
+          fi
+          {
+            echo "merged=false"
+            echo "stale=$stale"
+            echo "reason=$reason"
+          } >> "$GITHUB_OUTPUT"
+
+      # Dependabot rebases only on a comment it honours; an App-authored comment
+      # is used because a GITHUB_TOKEN one is not. Pull-requests write is enough
+      # to comment on a PR and read the comment's reactions.
+      # A failed mint fails the job: a broken key must be visible.
+      - name: Create GitHub App token
+        id: app-token
+        if: >-
+          (steps.fresh.outputs.stale == 'true' || steps.merge.outputs.stale == 'true')
+          && github.event.pull_request.user.login == 'dependabot[bot]'
+          && env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
+      - name: Request rebase
+        id: rebase
+        if: steps.fresh.outputs.stale == 'true' || steps.merge.outputs.stale == 'true'
+        env:
+          ACTOR: ${{ github.event.pull_request.user.login }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          ACK_ATTEMPTS: 6
+          ACK_SECONDS: 10
+        run: |
+          set -euo pipefail
+          result() { echo "rebase=$1" >> "$GITHUB_OUTPUT"; }
+
+          if [ "$ACTOR" != "dependabot[bot]" ]; then
+            # No bot rebases a fleet-bot branch, and a human update-branch adds a
+            # commit the gate refuses: a human merges this PR.
+            echo "::notice title=Not auto-merging::branch behind base; $ACTOR branches are not rebased automatically, merge by hand"
+            result not-applicable
+            exit 0
+          fi
+          if [ "$HAS_APP" != "true" ]; then
+            echo "::notice title=Not auto-merging::branch behind base; comment \`@dependabot rebase\` by hand (no APP_CLIENT_ID / APP_PRIVATE_KEY passed, and a GITHUB_TOKEN comment is not honoured)"
+            result no-app
+            exit 0
+          fi
+
+          echo "::notice title=Not auto-merging::branch behind base; requesting @dependabot rebase"
+          if ! comment="$(gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body='@dependabot rebase' --jq '[.id, .html_url] | @tsv')"; then
+            echo "::warning title=Rebase not requested::could not comment as ${APP_SLUG}[bot] (is the App installed with pull-requests write?); comment \`@dependabot rebase\` by hand"
+            result comment-failed
+            exit 0
+          fi
+          id="${comment%%$'\t'*}"
+          url="${comment##*$'\t'}"
+          # Dependabot acknowledges a command it accepts with a +1 reaction.
+          for ((i = 1; i <= ACK_ATTEMPTS; i++)); do
+            sleep "$ACK_SECONDS"
+            acks="$(gh api "repos/$REPO/issues/comments/$id/reactions" --jq '[.[] | select(.user.login == "dependabot[bot]")] | length' || true)"
+            if [[ "$acks" =~ ^[0-9]+$ ]] && [ "$acks" -gt 0 ]; then
+              echo "::notice title=Rebase requested::Dependabot acknowledged the @dependabot rebase comment by ${APP_SLUG}[bot]: $url"
+              result acknowledged
+              exit 0
+            fi
+          done
+          echo "::warning title=Rebase not acknowledged::Dependabot did not react to the @dependabot rebase comment by ${APP_SLUG}[bot] within $((ACK_ATTEMPTS * ACK_SECONDS))s ($url); if no rebase follows, comment by hand"
+          result unacknowledged
 
       - name: Summary
         if: always()
@@ -478,15 +669,26 @@ jobs:
           ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
           DECIDE_MERGE: ${{ steps.decide.outputs.merge }}
           DECIDE_REASON: ${{ steps.decide.outputs.reason }}
+          FRESH_STALE: ${{ steps.fresh.outputs.stale }}
+          FRESH_REASON: ${{ steps.fresh.outputs.reason }}
           VERIFY_OK: ${{ steps.verify.outputs.ok }}
           VERIFY_REASON: ${{ steps.verify.outputs.reason }}
+          MERGED: ${{ steps.merge.outputs.merged }}
+          MERGE_REASON: ${{ steps.merge.outputs.reason }}
           MERGE_OUTCOME: ${{ steps.merge.outcome }}
+          REBASE: ${{ steps.rebase.outputs.rebase }}
         run: |
           reason="$DECIDE_REASON"
-          if [ "$MERGE_OUTCOME" = "success" ]; then
+          if [ "$MERGED" = "true" ]; then
             decision="merged"
+          elif [ "$MERGED" = "false" ]; then
+            decision="not merged"
+            reason="$MERGE_REASON"
           elif [ "$MERGE_OUTCOME" = "failure" ]; then
-            decision="merge failed"
+            decision="merge step failed"
+          elif [ "$FRESH_STALE" = "true" ]; then
+            decision="not merged"
+            reason="$FRESH_REASON"
           elif [ "$DECIDE_MERGE" = "true" ] && [ -n "$VERIFY_REASON" ]; then
             decision="not merged"
             reason="$VERIFY_REASON"
@@ -504,4 +706,5 @@ jobs:
             echo "| Ecosystem | ${ECOSYSTEM:--} |"
             echo "| Decision | $decision |"
             echo "| Reason | ${reason:--} |"
+            echo "| Rebase request | ${REBASE:--} |"
           } >> "$GITHUB_STEP_SUMMARY"

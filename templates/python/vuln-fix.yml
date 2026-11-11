@@ -35,12 +35,12 @@ jobs:
       projects: '["src/app","src/worker"]'
       # Never moved by this workflow; the advisory goes to the rolling issue.
       # Mirror the exclusion of the Dependabot automerge job, if the repo has one.
+      # Example: the ML stack CI cannot exercise (docs/dependency-automation.md
+      # "Excluded dependencies"); majors are refused regardless.
       exclude-dependencies: |
         torch*
-        ultralytics*
         opencv*
         numpy
-        openai
     # Optional. Without them the fix PR is opened with GITHUB_TOKEN and CI does
     # not run on it. Map explicitly; never `secrets: inherit`.
     secrets:

@@ -156,6 +156,9 @@ func TestTemplatesAutomergeJob(t *testing.T) {
 	if p, ok := readPerms(val(job, "permissions")); !ok || !p.equal(PermsAutomergeJob) {
 		t.Errorf("%s automerge permissions = %s but policy.go PermsAutomergeJob = %s", rel, describePerms(val(job, "permissions")), PermsAutomergeJob)
 	}
+	if got := keys(val(job, "secrets")); !equalStrings(got, appSecrets) {
+		t.Errorf("%s automerge secrets = %v, want the App credentials %v", rel, got, appSecrets)
+	}
 }
 
 // templateRoot builds a fixture from pass-rollout with the given template

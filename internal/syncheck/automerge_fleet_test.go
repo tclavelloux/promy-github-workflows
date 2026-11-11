@@ -85,3 +85,59 @@ func TestFleetGate(t *testing.T) {
 		})
 	}
 }
+
+// Runs check_lock_excluded (Dependabot uv PRs): an excluded package moved by the
+// resolver refuses the PR even though dependency-names does not list it.
+func TestLockExcluded(t *testing.T) {
+	script, err := filepath.Abs(filepath.Join("..", "..", filepath.FromSlash(automergeGateScript)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := strings.ReplaceAll
+	mlBase := uvBase + "\n[[package]]\nname = \"torch\"\nversion = \"2.15.0\"\n\n[[package]]\nname = \"ultralytics\"\nversion = \"8.4.194\"\n\n[[package]]\nname = \"openai\"\nversion = \"3.42.0\"\n"
+	const ml = "torch*\nopencv*\nnumpy"
+	type f struct{ status, path, base, head string }
+	cases := []struct {
+		name    string
+		files   []f
+		exclude string
+		accept  bool
+		reason  string
+	}{
+		{"ultralytics and openai minors accepted", []f{{"modified", "src/leaflet/pyproject.toml", "a", "b"}, {"modified", "src/leaflet/uv.lock", mlBase, rep(rep(mlBase, "8.4.194", "8.5.0"), "3.42.0", "3.46.0")}}, ml, true, ""},
+		{"torch dragged along refused", []f{{"modified", "src/leaflet/uv.lock", mlBase, rep(rep(mlBase, "8.4.194", "8.5.0"), "2.15.0", "2.16.0")}}, ml, false, "uv.lock: excluded dependencies need a human review: 'torch' (pattern 'torch*')"},
+		{"excluded package added refused", []f{{"modified", "uv.lock", mlBase, mlBase + "\n[[package]]\nname = \"opencv-python\"\nversion = \"4.12.0\"\n"}}, ml, false, "'opencv-python' (pattern 'opencv*')"},
+		{"excluded package removed refused", []f{{"modified", "uv.lock", mlBase, rep(mlBase, "[[package]]\nname = \"torch\"\nversion = \"2.15.0\"\n", "")}}, ml, false, "'torch' (pattern 'torch*')"},
+		{"non-excluded move accepted", []f{{"modified", "uv.lock", uvBase, rep(uvBase, "2.32.3", "2.33.0")}}, ml, true, ""},
+		{"lock unchanged accepted", []f{{"modified", "pyproject.toml", "a", "b"}}, ml, true, ""},
+		{"added lock refused", []f{{"added", "uv.lock", "", mlBase}}, ml, false, "is added; cannot check excluded dependencies"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			var list []string
+			for _, x := range tc.files {
+				list = append(list, x.status+"\t"+x.path)
+				writeFile(t, root, "base/"+x.path, x.base)
+				writeFile(t, root, "head/"+x.path, x.head)
+			}
+			cmd := exec.Command("bash", "-c", `set -euo pipefail; source "$SCRIPT"; if reason="$(check_lock_excluded)"; then echo "ACCEPT"; else echo "REFUSE: $reason"; fi`)
+			cmd.Env = append(os.Environ(), "SCRIPT="+script, "FLEET_FILES="+strings.Join(list, "\n"),
+				"BASE_DIR="+filepath.Join(root, "base"), "HEAD_DIR="+filepath.Join(root, "head"), "EXCLUDE="+tc.exclude)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("bash: %v\n%s", err, out)
+			}
+			got := strings.TrimSpace(string(out))
+			if tc.accept {
+				if got != "ACCEPT" {
+					t.Errorf("got %q, want ACCEPT", got)
+				}
+				return
+			}
+			if !strings.HasPrefix(got, "REFUSE: ") || !strings.Contains(got, tc.reason) {
+				t.Errorf("got %q, want a refusal containing %q", got, tc.reason)
+			}
+		})
+	}
+}

@@ -376,4 +376,5 @@ func (c *checker) ciAutomerge(order []ciJob, byName map[string]ciJob) {
 	}
 	k, n := get(j.node, "permissions")
 	c.wantPerms(ciFile, line(k, j.line()), ruleCIAutomerge, `job "automerge"`, n, PermsAutomergeJob)
+	c.checkAppSecrets(ciFile, ruleCIAutomerge, "automerge", j.node)
 }
