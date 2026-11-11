@@ -23,6 +23,7 @@ Merges only when all hold:
 - Ecosystem is in `ecosystems` (`[a-z_-]` only; anything else refuses every PR).
 - Dependabot: update type is in `merge-update-types` (`dependabot/fetch-metadata`, SHA-pinned).
 - No dependency name matches `exclude-dependencies`: `*` `?` globs, case-insensitive, `.` `_` `-` equivalent, whole-name (`numpy` does not match `numpy-financial`). One match refuses the whole PR, grouped or not. Non-empty with no `dependency-names` fails closed.
+- Dependabot uv PRs with a non-empty `exclude-dependencies`: no package matching it moved, was added or was removed in any `uv.lock` (merge base vs head). `dependency-names` lists only what Dependabot asked for; an `ultralytics` bump can drag `torch` or `numpy` along. An added or removed `uv.lock` refuses.
 - Every commit on the PR is authored by the PR's own bot, not only the first one.
 - Each bot is tied to its branches: `dependabot/*` for Dependabot; `fix/vuln-*` (`go_modules`) and `fix/py-vuln-*` (`uv`) for `promy-fleet-bot[bot]`. A `GITHUB_TOKEN` PR (`github-actions[bot]`) never matches.
 - Fleet-bot PRs: the decision reads the diff (merge base vs head), not the title or body; fetch-metadata is skipped and `merge-update-types` does not apply. Every changed file is a modified `go.mod`, `go.sum` or `uv.lock` (not added, not renamed); same set of requirements; at least one bump; every version moves within the same major.minor, never down (`go` directive included); no pre-release or pseudo-version; no other changed line (`replace`, `exclude`, `toolchain`).

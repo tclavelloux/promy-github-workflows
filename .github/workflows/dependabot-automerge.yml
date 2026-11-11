@@ -20,6 +20,8 @@ name: Dependabot Automerge
 #   exclude-dependencies newline- or comma-separated globs (`torch*`, `numpy`);
 #                        one matching dependency-name refuses the whole (grouped)
 #                        PR. Case-insensitive; `.` `_` `-` are equivalent. Default none.
+#                        uv PRs: a matching package moved, added or removed in
+#                        any uv.lock (a resolver drag-along) refuses it too.
 #   wait-attempts / wait-seconds   poll budget for check runs outside this run.
 # The gate logic is scripts/automerge-gate.sh, inlined below (a reusable workflow
 # cannot read its own files at the caller's pinned ref).
@@ -334,7 +336,55 @@ jobs:
             printf 'patch-level bumps within the same minor, verified from the diff (%s): %s' "$ECOSYSTEM" "$summary"
             return 0
           }
+          # Dependabot uv PRs: the excluded-name check also covers what the resolver moved.
+          # dependency-names lists only the packages Dependabot asked for; an `ultralytics`
+          # bump can drag `torch` or `numpy` along in uv.lock without naming them.
+          # Reads FLEET_FILES, BASE_DIR, HEAD_DIR, EXCLUDE. Prints the refusal reason and
+          # returns 1 when a package matching EXCLUDE moved, was added or was removed.
+          check_lock_excluded() {
+            local status file tag kd name old new DEPENDENCIES="" reason
+            while IFS=$'\t' read -r status file; do
+              [ -n "$file" ] || continue
+              [ "${file##*/}" = uv.lock ] || continue
+              if [ "$status" != "modified" ]; then echo "'$file' is $status; cannot check excluded dependencies"; return 1; fi
+              while IFS=$'\t' read -r tag kd name old new; do
+                case "$tag" in
+                  BUMP) DEPENDENCIES="${DEPENDENCIES:+$DEPENDENCIES, }$name" ;;
+                  ERR) DEPENDENCIES="${DEPENDENCIES:+$DEPENDENCIES, }${kd%% *}" ;;
+                esac
+              done < <(manifest_diff <(manifest_entries "$file" "$BASE_DIR/$file") <(manifest_entries "$file" "$HEAD_DIR/$file"))
+            done <<< "$FLEET_FILES"
+            [ -n "$DEPENDENCIES" ] || return 0
+            if ! reason="$(check_excluded)"; then echo "uv.lock: $reason"; return 1; fi
+            return 0
+          }
           # <<< automerge-gate body
+
+          # Downloads each modified go.mod / uv.lock of the PR at the merge base and
+          # at the head into BASE_DIR / HEAD_DIR and exports FLEET_FILES. The base
+          # side is the merge base, so a base branch that moved on cannot fake a diff.
+          fetch_manifests() {
+            local file status merge_base
+            export BASE_DIR="$RUNNER_TEMP/manifests/base" HEAD_DIR="$RUNNER_TEMP/manifests/head"
+            FLEET_FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate -q '.[] | [.status, .filename] | @tsv')"
+            export FLEET_FILES
+            merge_base="$(gh api "repos/$REPO/compare/$BASE_SHA...$HEAD_SHA" -q .merge_base_commit.sha)"
+            while IFS=$'\t' read -r status file; do
+              [ -n "$file" ] || continue
+              # Same path rule as fleet_gate, which refuses anything else.
+              if ! printf '%s' "$file" | grep -Eq '^[A-Za-z0-9._/-]+$' || [[ "$file" == /* || "$file" == *..* ]]; then
+                reject "unexpected file path '$file'"
+              fi
+              [ "$status" = "modified" ] || continue
+              case "${file##*/}" in
+                go.mod | uv.lock)
+                  mkdir -p "$BASE_DIR/$(dirname "$file")" "$HEAD_DIR/$(dirname "$file")"
+                  gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$merge_base" > "$BASE_DIR/$file"
+                  gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$HEAD_SHA" > "$HEAD_DIR/$file"
+                  ;;
+              esac
+            done <<< "$FLEET_FILES"
+          }
 
           # The PR opener must be allowlisted (the job `if:` is the first line of
           # defence) and every commit must be authored by that same actor.
@@ -343,30 +393,17 @@ jobs:
               if ! reason="$(gate)"; then
                 reject "$reason"
               fi
+              if [ "$ECOSYSTEM" = "uv" ] && [ -n "$(printf '%s' "$EXCLUDE" | tr -d '[:space:],')" ]; then
+                fetch_manifests
+                if ! reason="$(check_lock_excluded)"; then
+                  reject "$reason"
+                fi
+              fi
               merge_reason="$UPDATE_TYPE on $ECOSYSTEM, all commits by $ACTOR"
               ;;
             "promy-fleet-bot[bot]")
-              # fetch-metadata does not apply: read the diff itself. The base side
-              # is the merge base, so a base branch that moved on cannot fake a diff.
-              base_dir="$RUNNER_TEMP/fleet/base"
-              head_dir="$RUNNER_TEMP/fleet/head"
-              FLEET_FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate -q '.[] | [.status, .filename] | @tsv')"
-              merge_base="$(gh api "repos/$REPO/compare/$BASE_SHA...$HEAD_SHA" -q .merge_base_commit.sha)"
-              while IFS=$'\t' read -r _ file; do
-                # Same path rule as fleet_gate, which refuses anything else.
-                if ! printf '%s' "$file" | grep -Eq '^[A-Za-z0-9._/-]+$' || [[ "$file" == /* || "$file" == *..* ]]; then
-                  reject "unexpected file path '$file'"
-                fi
-                case "${file##*/}" in
-                  go.mod | uv.lock)
-                    mkdir -p "$base_dir/$(dirname "$file")" "$head_dir/$(dirname "$file")"
-                    gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$merge_base" > "$base_dir/$file"
-                    gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$file?ref=$HEAD_SHA" > "$head_dir/$file"
-                    ;;
-                esac
-              done <<< "$FLEET_FILES"
-              export FLEET_FILES
-              export BASE_DIR="$base_dir" HEAD_DIR="$head_dir"
+              # fetch-metadata does not apply: read the diff itself.
+              fetch_manifests
               if ! merge_reason="$(fleet_gate)"; then
                 reject "$merge_reason"
               fi
