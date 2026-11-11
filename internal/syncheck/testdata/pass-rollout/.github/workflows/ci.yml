@@ -78,3 +78,6 @@ jobs:
       actions: read
       statuses: read
     uses: tclavelloux/promy-github-workflows/.github/workflows/dependabot-automerge.yml@dependabot-automerge/v1
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

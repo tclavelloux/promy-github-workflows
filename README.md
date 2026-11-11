@@ -310,6 +310,9 @@ Last job of the caller's `ci.yml` (rule `ci-automerge`; template `templates/ci-a
       actions: read
       statuses: read
     uses: tclavelloux/promy-github-workflows/.github/workflows/dependabot-automerge.yml@dependabot-automerge/v1
+    secrets:                                         # optional: rebase request on stale branches
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
 ```
 
 Defaults are the Go behaviour. A uv repo adds:
@@ -322,7 +325,7 @@ Defaults are the Go behaviour. A uv repo adds:
         numpy
 ```
 
-A refusal exits 0 with a `::notice` and a step summary.
+A refusal exits 0 with a `::notice` and a step summary. A branch behind its base under a strict ruleset, or a refused merge, also ends green; with the App secrets, a Dependabot PR gets an App-authored `@dependabot rebase`. Details and the excluded-dependency rationale: [docs/dependency-automation.md](docs/dependency-automation.md#stale-branches).
 
 ### Vuln fix
 
