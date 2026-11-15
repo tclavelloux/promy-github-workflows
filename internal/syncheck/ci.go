@@ -163,7 +163,7 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 				c.add(ciFile, j.line(), ruleCIJobs, "job %q is not allowed in the docs profile (the repo has no code to build, test or scan); remove it", j.name)
 			}
 		}
-	} else {
+	} else if c.prof != flutterProfile {
 		allowed[CIDockerJob] = true
 	}
 
@@ -177,6 +177,8 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 	switch c.prof {
 	case docsProfile:
 		// docker is forbidden outright, reported above
+	case flutterProfile:
+		// docker is an unknown job, reported below
 	case goProfile:
 		hasDockerfile := c.isRegularFile("Dockerfile")
 		switch {
@@ -200,7 +202,7 @@ func (c *checker) ciJobSet(jobsKey *yaml.Node, order []ciJob, byName map[string]
 		}
 		if !allowed[j.name] {
 			list := append(append([]string{}, required...), optional...)
-			if c.prof != docsProfile {
+			if c.prof == goProfile || c.prof == pythonProfile {
 				list = append(append(append([]string{}, required...), CIDockerJob), optional...)
 			}
 			c.add(ciFile, j.line(), ruleCIJobs, "unknown job %q; allowed: %s", j.name, strings.Join(list, ", "))

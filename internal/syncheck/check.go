@@ -21,7 +21,7 @@ type checker struct {
 	findings []Finding
 	ioErr    error
 
-	prof       *profile // detected repo profile (go, python or docs)
+	prof       *profile // detected repo profile (go, python, flutter or docs)
 	profileMsg string   // why detectProfile returned nil, when it knows
 	tracked    []string // trackedFiles cache; nil until first use
 }
@@ -42,7 +42,7 @@ func Run(root string) (Report, error) {
 		// Fail closed: a repo the policy cannot classify never passes.
 		msg := c.profileMsg
 		if msg == "" {
-			msg = "no repo profile: want a go.mod at the root (Go), a tracked uv.lock or pyproject.toml (Python) or a " + ProfileMarkerFile + " file holding `" + DocsProfileName + "` (docs); nothing else was checked"
+			msg = "no repo profile: want a go.mod at the root (Go), a tracked uv.lock or pyproject.toml (Python), a root pubspec.yaml (Flutter) or a " + ProfileMarkerFile + " file holding `" + DocsProfileName + "` (docs); nothing else was checked"
 		}
 		c.add(".", 0, ruleProfile, "%s", msg)
 		return applyExemptions(c.files, c.findings), nil
@@ -52,7 +52,7 @@ func Run(root string) (Report, error) {
 	c.checkCI()
 	c.checkPRTitle()
 	c.checkReleasePlease()
-	if c.prof != docsProfile {
+	if c.prof.vulnFixWorkflow != "" { // docs and Flutter have no vuln-fix workflow
 		c.checkVulnFix()
 	}
 	c.checkDependabot()

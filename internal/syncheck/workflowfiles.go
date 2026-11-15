@@ -246,8 +246,11 @@ func (c *checker) checkDependabot() {
 		}
 	}
 	ecosystems := []string{"gomod", "github-actions"}
-	if c.prof == docsProfile {
+	switch c.prof {
+	case docsProfile:
 		ecosystems = []string{"github-actions"}
+	case flutterProfile:
+		ecosystems = []string{"pub", "github-actions"}
 	}
 	for _, eco := range ecosystems {
 		if !have[eco] {

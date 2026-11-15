@@ -85,6 +85,20 @@
       ]
     },
     {
+      "name": "flutter",
+      "upstream": {
+        "repo": "flutter/flutter",
+        "kind": "tag",
+        "prefix": ""
+      },
+      "locations": [
+        {
+          "file": "internal/syncheck/policy.go",
+          "const": "FlutterVersion"
+        }
+      ]
+    },
+    {
       "name": "actionlint",
       "upstream": {
         "repo": "rhysd/actionlint",

@@ -19,7 +19,11 @@ import (
 //     a violation: letting either side win would silently drop gates.
 //  2. a regular file go.mod at the root: Go
 //  3. any tracked uv.lock or pyproject.toml: Python
-//  4. none: a `profile` violation and nothing else is checked
+//  4. a regular file pubspec.yaml at the root: Flutter (a nested one does not count)
+//  5. none: a `profile` violation and nothing else is checked
+//
+// A root pubspec.yaml next to the docs marker, a root go.mod or a tracked
+// uv.lock/pyproject.toml is a violation too: there is no winner to pick.
 //
 // A repo with both a root go.mod and Python files is a Go repo: the Go gates
 // are the stricter, established set, and a Go service may carry Python tooling.
@@ -99,6 +103,19 @@ var docsProfile = &profile{
 	dependabotTp: "add it with a github-actions entry at \"/\" (see templates/docs/dependabot.yml)",
 }
 
+// flutterProfile has no vuln, coverage or test-hook rules yet: those wait for
+// their own workflows and hooks.
+var flutterProfile = &profile{
+	name:         "flutter",
+	requiredJobs: FlutterCIRequiredJobs,
+	optionalJobs: FlutterCIOptionalJobs,
+	reusableJobs: FlutterCIReusableJobs,
+	noPermJobs:   FlutterCINoPermJobs,
+	ciMissing:    "with jobs lint, test, gitleaks; see templates/flutter/ci.yml",
+	precommitTpl: "templates/docs/pre-commit-config.yaml",
+	dependabotTp: "add it with pub and github-actions entries at \"/\" (see templates/flutter/dependabot.yml)",
+}
+
 // detectProfile returns the repo's profile, or nil with c.profileMsg set to the
 // reason (empty: nothing matched).
 func (c *checker) detectProfile() *profile {
@@ -106,6 +123,9 @@ func (c *checker) detectProfile() *profile {
 	var code []string
 	if c.isRegularFile("go.mod") {
 		code = append(code, "go.mod")
+	}
+	if c.isRegularFile(FlutterSignalFile) {
+		code = append(code, FlutterSignalFile)
 	}
 	for _, f := range c.trackedFiles() {
 		if b := posixpath.Base(f); b == "uv.lock" || b == "pyproject.toml" {
@@ -124,6 +144,14 @@ func (c *checker) detectProfile() *profile {
 		}
 		return docsProfile
 	}
+	hasPubspec := c.isRegularFile(FlutterSignalFile)
+	if hasPubspec && len(code) > 1 {
+		c.profileMsg = fmt.Sprintf("%s selects the Flutter profile but %s exists; remove one (a repo has one profile, and picking a winner would silently drop gates); nothing else was checked", FlutterSignalFile, strings.Join(without(code, FlutterSignalFile), ", "))
+		return nil
+	}
+	if hasPubspec {
+		return flutterProfile
+	}
 	if c.isRegularFile("go.mod") {
 		return goProfile
 	}
@@ -131,6 +159,16 @@ func (c *checker) detectProfile() *profile {
 		return pythonProfile
 	}
 	return nil
+}
+
+func without(list []string, drop string) []string {
+	var out []string
+	for _, s := range list {
+		if s != drop {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // walkSkipDirs are never descended into when root is not a git work tree
