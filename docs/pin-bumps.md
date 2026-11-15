@@ -21,7 +21,7 @@
 - `upstream.kind: release`: `GET /repos/{repo}/releases/latest`, `.tag_name`.
 - `upstream.kind: file`: `GET /repos/{repo}/contents/{path}` (`?ref=` when `ref` is set), base64-decoded; `pattern` (one capture group, multiline) must match exactly once and capture a plain version. Fields: `repo`, `path`, `pattern`, optional `ref`. Used for uv: `dependabot/dependabot-core`, `uv/helpers/requirements.txt`, `^uv==(\S+)$`.
 - `upstream.exact: true` (optional): the pin must equal upstream. A current value above upstream is status `ahead` and counts in `behind=` and the issue like `behind`. Without it, ahead is `current`.
-- `upstream.kind: tag`: highest plain `X.Y.Z` tag under `prefix` (no prereleases, numeric order). Use it when the project publishes no GitHub releases (govulncheck: `golang/vuln`, prefix `v`; hooks rev: prefix `hooks/v`).
+- `upstream.kind: tag`: highest plain `X.Y.Z` tag under `prefix` (no prereleases, numeric order). Use it when the project publishes no GitHub releases (govulncheck: `golang/vuln`, prefix `v`; hooks rev: prefix `hooks/v`; Flutter: `flutter/flutter`, empty prefix, because `releases/latest` there is a stale prerelease).
 - Location `{file}`: the whole file, trimmed, is the version.
 - Location `{file, const}`: Go constant `NAME = "x"` in that file.
 - Location `{file, pattern}`: regex with exactly one capture group that matches exactly once (multiline). Keep to the RE2 subset: Python and the Go test both compile it.
@@ -87,3 +87,8 @@ Template revs (pre-commit-hooks, conventional-pre-commit, gitleaks, uv-pre-commi
 1. Governance PR first: the template is a tested `workflow-sync` pass case.
 2. `pre-commit autoupdate --repo <url>`, then restore the uv and ruff revs to match `.uv-version` and `.ruff-version`.
 3. Consumers copy the template revs.
+
+Flutter SDK:
+
+1. Governance PR: `FlutterVersion` in `policy.go` and `internal/syncheck/testdata/pass-flutter/.flutter-version` together.
+2. Each Flutter consumer: `.flutter-version`, in the PR that bumps `rev:` to the `hooks/vX.Y.Z` carrying the new policy.
