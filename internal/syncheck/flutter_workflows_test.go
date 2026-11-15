@@ -1,6 +1,7 @@
 package syncheck
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -156,5 +157,113 @@ func TestFlutterLintAnalyzeNeedsDeps(t *testing.T) {
 	cond := normExpr(scalar(val(analyze, "if")))
 	if !strings.Contains(cond, "steps."+id+".outcome == 'success'") || !strings.Contains(cond, "!cancelled()") {
 		t.Errorf("%s Analyze if = %q; want !cancelled() && steps.%s.outcome == 'success'", rel, cond, id)
+	}
+}
+
+// flutter-vuln.yml is checked apart from flutter-lint and flutter-test: it needs
+// no SDK, so it has no Resolve step and no flutter-action.
+func TestFlutterVulnHardRules(t *testing.T) {
+	const rel = ".github/workflows/flutter-vuln.yml"
+	doc := govYAML(t, rel)
+	if p, ok := readPerms(val(doc, "permissions")); !ok || !p.equal(PermsRead) {
+		t.Errorf("%s top-level permissions = %s, want %s", rel, describePerms(val(doc, "permissions")), PermsRead)
+	}
+	if secrets := path(doc, "on", "workflow_call", "secrets"); secrets != nil {
+		t.Errorf("%s declares workflow_call secrets; it takes none", rel)
+	}
+	if path(doc, "on", "workflow_call", "inputs", "projects") != nil {
+		t.Errorf("%s has a projects input; it scans the root pubspec.lock only", rel)
+	}
+	if val(doc, "concurrency") != nil {
+		t.Errorf("%s sets concurrency; the caller owns it", rel)
+	}
+	jobs := val(doc, "jobs")
+	if len(keys(jobs)) != 1 || keys(jobs)[0] != "vuln" {
+		t.Fatalf("%s jobs = %v, want the single job \"vuln\" (the caller's check name depends on it)", rel, keys(jobs))
+	}
+	job := val(jobs, "vuln")
+	if val(job, "permissions") != nil {
+		t.Errorf("%s job vuln sets permissions; the top-level read applies", rel)
+	}
+	if val(job, "strategy") != nil {
+		t.Errorf("%s job vuln has a matrix; it scans one lock", rel)
+	}
+	if scalar(val(job, "timeout-minutes")) == "" {
+		t.Errorf("%s job vuln has no timeout-minutes", rel)
+	}
+	checkouts := 0
+	for _, step := range val(job, "steps").Content {
+		step = deref(step)
+		if run := scalar(val(step, "run")); ctxInShell.MatchString(run) {
+			t.Errorf("%s step %q interpolates a context into run:; pass it through env:", rel, scalar(val(step, "name")))
+		}
+		uses := scalar(val(step, "uses"))
+		if uses == "" {
+			continue
+		}
+		if !shaPinned.MatchString(uses) {
+			t.Errorf("%s uses %q, want <action>@<40 hex>", rel, uses)
+		}
+		if _, v := get(step, "uses"); v != nil && !versionNote.MatchString(v.LineComment) {
+			t.Errorf("%s uses %q without a trailing `# vX.Y.Z` comment (got %q)", rel, uses, v.LineComment)
+		}
+		if strings.HasPrefix(uses, "actions/checkout@") {
+			checkouts++
+			if !isBool(path(step, "with", "persist-credentials"), false) {
+				t.Errorf("%s checkout without `persist-credentials: false`", rel)
+			}
+		}
+	}
+	if checkouts != 1 {
+		t.Errorf("%s has %d checkouts, want 1", rel, checkouts)
+	}
+}
+
+// flutter-vuln.yml installs the same osv-scanner as python-vuln.yml, policy.go and
+// the hook (.osv-scanner-version): a different scanner would disagree with the
+// local hook on what is vulnerable.
+func TestFlutterVulnOSVDefaults(t *testing.T) {
+	const rel = ".github/workflows/flutter-vuln.yml"
+	def := func(rel, input string) string {
+		return scalar(path(govYAML(t, rel), "on", "workflow_call", "inputs", input, "default"))
+	}
+	for _, input := range []string{"osv-scanner-version", "osv-scanner-sha256"} {
+		got, want := def(rel, input), def(govPyVulnYML, input)
+		if got == "" || got != want {
+			t.Errorf("flutter-vuln.yml %s default = %q but python-vuln.yml has %q; change both together", input, got, want)
+		}
+	}
+	if got := strings.TrimPrefix(def(rel, "osv-scanner-version"), "v"); got != OSVScannerVersion {
+		t.Errorf("flutter-vuln.yml osv-scanner-version default = %s but policy.go OSVScannerVersion = %s", got, OSVScannerVersion)
+	}
+	pin := strings.TrimPrefix(strings.TrimSpace(string(govRead(t, ".osv-scanner-version"))), "v")
+	if got := strings.TrimPrefix(def(rel, "osv-scanner-version"), "v"); got != pin {
+		t.Errorf("flutter-vuln.yml osv-scanner-version default = %s but .osv-scanner-version = %s", got, pin)
+	}
+	if sum := def(rel, "osv-scanner-sha256"); !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(sum) {
+		t.Errorf("flutter-vuln.yml osv-scanner-sha256 default = %q, want 64 lowercase hex characters", sum)
+	}
+}
+
+// The run step scans the root pubspec.lock and fails closed when it is missing.
+func TestFlutterVulnScansRootLock(t *testing.T) {
+	const rel = ".github/workflows/flutter-vuln.yml"
+	var run string
+	for _, step := range path(govYAML(t, rel), "jobs", "vuln", "steps").Content {
+		step = deref(step)
+		if scalar(val(step, "name")) == "Run osv-scanner" {
+			run = scalar(val(step, "run"))
+		}
+	}
+	if run == "" {
+		t.Fatalf("%s has no `Run osv-scanner` step", rel)
+	}
+	if !regexp.MustCompile(`if \[ ! -f "\$lock" \]; then\n\s*echo "::error::[^\n]*"\n\s*exit 1\n\s*fi`).MatchString(run) {
+		t.Errorf("%s: the missing-lock branch must print ::error:: and exit 1", rel)
+	}
+	for _, want := range []string{`lock="pubspec.lock"`, "--lockfile", "--config osv-scanner.toml"} {
+		if !strings.Contains(run, want) {
+			t.Errorf("%s run step lacks %q", rel, want)
+		}
 	}
 }

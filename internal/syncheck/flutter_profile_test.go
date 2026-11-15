@@ -9,6 +9,26 @@ import (
 
 const flutterPassFixture = "pass-flutter"
 
+// Blocks of the fixture's .pre-commit-config.yaml, for the precommit-dart-hooks cases.
+const (
+	dartFormatHook = `      - id: dart-format
+        name: dart format
+        entry: dart format --set-exit-if-changed .
+        language: system
+        types: [dart]
+        pass_filenames: false
+        stages: [pre-commit]
+`
+	dartAnalyzeHook = `      - id: dart-analyze
+        name: dart analyze
+        entry: dart analyze --fatal-infos
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+`
+)
+
 func TestFlutterProfileDetection(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -112,7 +132,7 @@ func TestFlutterDrift(t *testing.T) {
 		return func(t *testing.T, r string) {
 			replace(t, r, ciRel, "\n  automerge:", extraJob+"\n  automerge:")
 			replace(t, r, ciRel, "  extra:\n", "  "+name+":\n")
-			replace(t, r, ciRel, "needs: [lint, test, gitleaks]", "needs: [lint, test, gitleaks, "+name+"]")
+			replace(t, r, ciRel, "needs: [lint, vuln, test, gitleaks]", "needs: [lint, vuln, test, gitleaks, "+name+"]")
 		}
 	}
 	cases := []struct {
@@ -122,17 +142,62 @@ func TestFlutterDrift(t *testing.T) {
 		rules []string
 		msg   string
 	}{
-		{name: "lint job missing", do: dropJob("lint", "test", "needs: [lint, test, gitleaks]", "needs: [test, gitleaks]"), rules: []string{"ci-jobs"}, msg: `required job "lint"`},
-		{name: "test job missing", do: dropJob("test", "gitleaks", "needs: [lint, test, gitleaks]", "needs: [lint, gitleaks]"), rules: []string{"ci-jobs"}, msg: `required job "test"`},
-		{name: "gitleaks job missing", do: dropJob("gitleaks", "automerge", "needs: [lint, test, gitleaks]", "needs: [lint, test]"), rules: []string{"ci-jobs"}, msg: `required job "gitleaks"`},
-		{name: "docker job is unknown", do: extra("docker"), rules: []string{"ci-jobs"}, msg: `unknown job "docker"; allowed: lint, test, gitleaks, automerge`},
-		{name: "vuln job is unknown", do: extra("vuln"), rules: []string{"ci-jobs"}, msg: `unknown job "vuln"`},
+		{name: "lint job missing", do: dropJob("lint", "vuln", "needs: [lint, vuln, test, gitleaks]", "needs: [vuln, test, gitleaks]"), rules: []string{"ci-jobs"}, msg: `required job "lint"`},
+		{name: "test job missing", do: dropJob("test", "gitleaks", "needs: [lint, vuln, test, gitleaks]", "needs: [lint, vuln, gitleaks]"), rules: []string{"ci-jobs"}, msg: `required job "test"`},
+		{name: "gitleaks job missing", do: dropJob("gitleaks", "automerge", "needs: [lint, vuln, test, gitleaks]", "needs: [lint, vuln, test]"), rules: []string{"ci-jobs"}, msg: `required job "gitleaks"`},
+		{name: "docker job is unknown", do: extra("docker"), rules: []string{"ci-jobs"}, msg: `unknown job "docker"; allowed: lint, vuln, test, gitleaks, automerge`},
+		{name: "vuln job missing", do: dropJob("vuln", "test", "needs: [lint, vuln, test, gitleaks]", "needs: [lint, test, gitleaks]"), rules: []string{"ci-jobs"}, msg: `required job "vuln"`},
+		{name: "vuln calls python-vuln", edits: []edit{ed(ciRel, "flutter-vuln.yml@flutter-vuln/v1", "python-vuln.yml@python-vuln/v1")}, rules: []string{"ci-job-ref"}, msg: "flutter-vuln.yml@flutter-vuln/v1"},
+		{name: "vuln has permissions", edits: []edit{ed(ciRel, "  vuln:\n", "  vuln:\n    permissions:\n      contents: read\n")}, rules: []string{"ci-job-permissions"}, msg: `job "vuln"`},
+		{name: "vuln at a wrong major", edits: []edit{ed(ciRel, "flutter-vuln/v1", "flutter-vuln/v2")}, rules: []string{"governance-ref"}, msg: "flutter-vuln"},
 		{name: "coverage job is unknown", do: extra("coverage"), rules: []string{"ci-jobs"}, msg: `unknown job "coverage"`},
 		{name: "typecheck job is unknown", do: extra("typecheck"), rules: []string{"ci-jobs"}, msg: `unknown job "typecheck"`},
 		{name: "lint calls go-lint", edits: []edit{ed(ciRel, "flutter-lint.yml@flutter-lint/v1", "go-lint.yml@go-lint/v1")}, rules: []string{"ci-job-ref"}, msg: "flutter-lint.yml@flutter-lint/v1"},
 		{name: "test at a wrong major", edits: []edit{ed(ciRel, "flutter-test/v1", "flutter-test/v2")}, rules: []string{"governance-ref"}, msg: "flutter-test"},
 		{name: "lint without workflow-sync", edits: []edit{ed(ciRel, lintSyncBlock, "")}, rules: []string{"ci-lint-sync"}, msg: "(absent)"},
 		{name: "lint has permissions", edits: []edit{ed(ciRel, "  lint:\n", "  lint:\n    permissions:\n      contents: read\n")}, rules: []string{"ci-job-permissions"}, msg: `job "lint"`},
+		// precommit-dart-hooks
+		{name: "dart-format hook missing", edits: []edit{ed(pcRel, dartFormatHook, "")}, rules: []string{"precommit-dart-hooks"}, msg: `no ` + "`repo: local`" + ` hook "dart-format"`},
+		{name: "dart-format at pre-push", edits: []edit{ed(pcRel, dartFormatHook, strings.Replace(dartFormatHook, "[pre-commit]", "[pre-push]", 1))}, rules: []string{"precommit-dart-hooks"}, msg: "dart-format: stages = {pre-push}"},
+		{name: "dart-format without --set-exit-if-changed", edits: []edit{ed(pcRel, "dart format --set-exit-if-changed .", "dart format .")}, rules: []string{"precommit-dart-hooks"}, msg: "dart-format: entry"},
+		{name: "dart-analyze hook missing", edits: []edit{ed(pcRel, dartAnalyzeHook, "")}, rules: []string{"precommit-dart-hooks"}, msg: `hook "dart-analyze"`},
+		{name: "dart-analyze without --fatal-infos", edits: []edit{ed(pcRel, "dart analyze --fatal-infos", "dart analyze")}, rules: []string{"precommit-dart-hooks"}, msg: "dart-analyze: entry"},
+		{name: "dart-analyze at pre-commit", edits: []edit{ed(pcRel, dartAnalyzeHook, strings.Replace(dartAnalyzeHook, "[pre-push]", "[pre-commit]", 1))}, rules: []string{"precommit-dart-hooks"}, msg: "dart-analyze: stages = {pre-commit}"},
+		{name: "flutter-test without the env prefix", edits: []edit{ed(pcRel, "entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test", "entry: flutter test")}, rules: []string{"precommit-dart-hooks"}, msg: "promy-frontend#46"},
+		{name: "flutter-test with pass_filenames true", edits: []edit{ed(pcRel, "        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test\n        language: system\n        pass_filenames: false", "        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test\n        language: system\n        pass_filenames: true")}, rules: []string{"precommit-dart-hooks"}, msg: "flutter-test: pass_filenames must be false"},
+		{name: "flutter-test language script", edits: []edit{ed(pcRel, "        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test\n        language: system", "        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test\n        language: script")}, rules: []string{"precommit-dart-hooks"}, msg: "flutter-test: language"},
+		{name: "dart-analyze without always_run", edits: []edit{ed(pcRel, dartAnalyzeHook, strings.Replace(dartAnalyzeHook, "        always_run: true\n", "", 1))}, rules: []string{"precommit-dart-hooks"}, msg: "dart-analyze: always_run must be true"},
+		{name: "flutter-test always_run false", edits: []edit{ed(pcRel, "        always_run: true\n        stages: [pre-push]\n", "        always_run: false\n        stages: [pre-push]\n")}, rules: []string{"precommit-dart-hooks"}, msg: "always_run must be true"},
+		{name: "dart-analyze with files", edits: []edit{ed(pcRel, dartAnalyzeHook, dartAnalyzeHook+"        files: ^lib/\n")}, rules: []string{"precommit-dart-hooks"}, msg: "dart-analyze: files narrows"},
+		{name: "flutter-test with exclude", edits: []edit{ed(pcRel, "        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test\n", "        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test\n        exclude: ^test/\n")}, rules: []string{"precommit-dart-hooks"}, msg: "flutter-test: exclude narrows"},
+		{name: "dart-format with files", edits: []edit{ed(pcRel, dartFormatHook, dartFormatHook+"        files: ^lib/\n")}, rules: []string{"precommit-dart-hooks"}, msg: "dart-format: files narrows"},
+		{name: "dart-format with other types", edits: []edit{ed(pcRel, "types: [dart]", "types: [markdown]")}, rules: []string{"precommit-dart-hooks"}, msg: "dart-format: types = {markdown}"},
+		{name: "dart-analyze with types", edits: []edit{ed(pcRel, dartAnalyzeHook, dartAnalyzeHook+"        types: [dart]\n")}, rules: []string{"precommit-dart-hooks"}, msg: "dart-analyze: types = {dart}"},
+		{name: "dart-format without types passes", edits: []edit{ed(pcRel, "        types: [dart]\n", "")}},
+		{name: "non-compliant flutter-test above the compliant one", do: func(t *testing.T, r string) {
+			replace(t, r, pcRel, "      - id: flutter-test\n", "      - id: flutter-test\n        name: dup\n        entry: flutter test\n        language: system\n        pass_filenames: false\n        always_run: true\n        stages: [pre-push]\n      - id: flutter-test\n")
+		}, rules: []string{"precommit-dart-hooks"}, msg: "flutter-test: entry = \"flutter test\""},
+		{name: "dart-format only in a non-local repo", do: func(t *testing.T, r string) {
+			replace(t, r, pcRel, dartFormatHook, "")
+			appendFile(t, r, pcRel, "\n  - repo: https://example.com/other\n    rev: v1\n    hooks:\n"+dartFormatHook)
+		}, rules: []string{"precommit-dart-hooks"}, msg: "no `repo: local` hook \"dart-format\""},
+		// vuln-target (shared rule, Flutter values)
+		{name: "flutter-vuln hook without vuln target", edits: []edit{ed(mkRel, "vuln:\n\tpre-commit run flutter-vuln --hook-stage manual\n", "")}, rules: []string{"vuln-target"}, msg: `hook "flutter-vuln"`},
+		{name: "vuln target without flutter-vuln hook", edits: []edit{ed(pcRel, "      - id: flutter-vuln\n", "")}, rules: []string{"vuln-target"}, msg: "templates/flutter/pre-commit-config.yaml"},
+		{name: "vuln recipe runs go-vuln", edits: []edit{ed(mkRel, "run flutter-vuln", "run go-vuln")}, rules: []string{"vuln-target"}, msg: "pre-commit run flutter-vuln --hook-stage manual"},
+		// osv-scanner.toml
+		{name: "ignore without reason", do: func(t *testing.T, r string) {
+			writeFile(t, r, "osv-scanner.toml", "[[IgnoredVulns]]\nid = \"GHSA-x\"\nignoreUntil = 2026-12-01\n")
+		}, rules: []string{"osv-ignore-expiry"}, msg: "has no reason"},
+		{name: "ignore without id", do: func(t *testing.T, r string) {
+			writeFile(t, r, "osv-scanner.toml", "[[IgnoredVulns]]\nreason = \"r\"\nignoreUntil = 2026-12-01\n")
+		}, rules: []string{"osv-ignore-expiry"}, msg: "has no id"},
+		{name: "ignore 91 days ahead", do: func(t *testing.T, r string) {
+			writeFile(t, r, "osv-scanner.toml", "[[IgnoredVulns]]\nid = \"GHSA-x\"\nreason = \"r\"\nignoreUntil = 2027-01-17\n")
+		}, rules: []string{"osv-ignore-expiry"}, msg: "set it to 2027-01-16 or earlier"},
+		{name: "ignore within 90 days passes", do: func(t *testing.T, r string) {
+			writeFile(t, r, "osv-scanner.toml", "[[IgnoredVulns]]\nid = \"GHSA-x\"\nreason = \"r\"\nignoreUntil = 2027-01-16\n")
+		}},
 		{name: "flutter-version missing", do: rm(".flutter-version"), rules: []string{"flutter-version"}, msg: "file missing"},
 		{name: "flutter-version drift", do: func(t *testing.T, r string) { writeFile(t, r, ".flutter-version", "3.47.9\n") }, rules: []string{"flutter-version"}, msg: "want 3.50.0"},
 		{name: "flutter-version with v prefix passes", do: func(t *testing.T, r string) { writeFile(t, r, ".flutter-version", "v3.50.0\n") }},
@@ -172,10 +237,10 @@ func TestFlutterDrift(t *testing.T) {
 	}
 }
 
-// Rules whose gates have not shipped for Flutter stay silent: the fixture has no
-// check-coverage hook and no vuln target, and passes (TestPassFlutter).
+// The coverage rules have not shipped for Flutter: the fixture has no
+// check-coverage hook and passes (TestPassFlutter).
 //
-// vuln-fix.yml is the exception: Flutter has no governance vuln-fix workflow, so
+// vuln-fix.yml is forbidden: Flutter has no governance vuln-fix workflow, so
 // any such file is hand-rolled and fails, whatever it contains.
 func TestFlutterProfileForbidsVulnFix(t *testing.T) {
 	root := fixture(t, flutterPassFixture)
@@ -193,8 +258,10 @@ func TestFlutterProfileForbidsVulnFix(t *testing.T) {
 func TestTemplatesFlutter(t *testing.T) {
 	root := fixture(t, flutterPassFixture)
 	for tmpl, dst := range map[string]string{
-		"templates/flutter/ci.yml":         ciRel,
-		"templates/flutter/dependabot.yml": depRel,
+		"templates/flutter/ci.yml":                 ciRel,
+		"templates/flutter/dependabot.yml":         depRel,
+		"templates/flutter/pre-commit-config.yaml": pcRel,
+		"templates/flutter/Makefile":               mkRel,
 	} {
 		writeFile(t, root, dst, string(govRead(t, tmpl)))
 	}

@@ -11,7 +11,7 @@
 | Automerge | `.github/workflows/dependabot-automerge.yml`, `templates/ci-automerge-job.yml` | `dependabot-automerge/v1` | Green patch/minor PRs sit unmerged |
 | Go vuln fix | `.github/workflows/go-vuln-fix.yml`, `templates/go-vuln-fix-caller.yml` | `go-vuln-fix/v1` | Called advisories wait for a human to notice |
 | Python vuln fix | `.github/workflows/python-vuln-fix.yml`, `templates/python/vuln-fix.yml` | `python-vuln-fix/v1` | OSV-only advisories (PYSEC, no GHSA) that Dependabot's `uv-security` group never fixes |
-| Pre-push hooks | `hooks/go-vuln.sh`, `hooks/py-vuln.sh`, `.pre-commit-hooks.yaml` | `hooks/vX.Y.Z` | Advisories surface only after push |
+| Pre-push hooks | `hooks/go-vuln.sh`, `hooks/py-vuln.sh`, `hooks/flutter-vuln.sh`, `.pre-commit-hooks.yaml` | `hooks/vX.Y.Z` | Advisories surface only after push |
 | Local twins and CI guard | `scripts/go-vuln-fix.sh`, `scripts/go-vuln-gate.sh`, `scripts/python_vuln_fix.py`, `.github/workflows/ci.yml`, `internal/syncheck/python_workflows_test.go`, `internal/syncheck/go_vuln_gate_test.go` | none | Version and fix-logic drift |
 
 ## Automerge gate
@@ -164,7 +164,7 @@ One PR, titled `ci: automate dependency bumps and vuln fixes`:
 2. Append `templates/ci-automerge-job.yml` to `ci.yml`, with every other job in `needs:`.
 3. Add `.github/workflows/vuln-fix.yml` from `templates/go-vuln-fix-caller.yml` or `templates/python/vuln-fix.yml`.
 4. Install the fleet App on the repo and add `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repo secrets; map them into the `vuln-fix` and `automerge` jobs. Skip it and fix PRs run no CI, and stale Dependabot PRs wait for a human `@dependabot rebase`.
-5. `.pre-commit-config.yaml`: latest immutable `hooks/vX.Y.Z`, `- id: go-vuln` or `- id: py-vuln`, plus the `vuln:` target (`templates/Makefile.vuln.mk` or `templates/python/Makefile`).
+5. `.pre-commit-config.yaml`: latest immutable `hooks/vX.Y.Z`, `- id: go-vuln`, `- id: py-vuln` or `- id: flutter-vuln`, plus the `vuln:` target (`templates/Makefile.vuln.mk`, `templates/python/Makefile` or `templates/flutter/Makefile`).
 6. Merge with the keyring token: `GH_TOKEN= gh pr merge --squash`.
 
 After merge:

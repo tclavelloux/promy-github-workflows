@@ -62,8 +62,10 @@ func Run(root string) (Report, error) {
 	c.checkPreCommit()
 	c.checkMakefile()
 	c.checkRepoFiles()
-	if c.prof == pythonProfile {
+	if c.prof == pythonProfile || c.prof == flutterProfile {
 		c.checkOSVIgnores()
+	}
+	if c.prof == pythonProfile {
 		c.checkCoverageFloors()
 	}
 

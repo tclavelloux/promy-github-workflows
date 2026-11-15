@@ -18,7 +18,7 @@ const (
 	// The Python profile requires .ruff-version, the ruff-pre-commit rev and
 	// .uv-version to equal these; python-lint ties every other pin to those files.
 	RuffVersion       = "0.17.3" // python-lint.yml ruff-version default
-	OSVScannerVersion = "2.7.0"  // python-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln hook)
+	OSVScannerVersion = "2.7.0"  // python-vuln.yml and flutter-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln and flutter-vuln hooks)
 	UVVersion         = "0.13.5" // fleet uv pin; templates/python/pre-commit-config.yaml uv-pre-commit rev
 
 	// FlutterVersion is the fleet Flutter SDK. The Flutter profile requires
@@ -59,6 +59,7 @@ var WorkflowMajors = map[string]int{
 	"docs-lint":            1,
 	"flutter-lint":         1,
 	"flutter-test":         1,
+	"flutter-vuln":         1,
 	"release-please":       1,
 }
 
@@ -110,12 +111,12 @@ var (
 )
 
 // Job sets of ci.yml in the Flutter profile. automerge is optional, as in the
-// other profiles; coverage and vuln are unknown jobs until their workflows land.
+// other profiles; coverage is an unknown job until its workflow lands.
 var (
-	FlutterCIRequiredJobs = []string{"lint", "test", "gitleaks"}
+	FlutterCIRequiredJobs = []string{"lint", "vuln", "test", "gitleaks"}
 	FlutterCIOptionalJobs = []string{"automerge"}
-	FlutterCIReusableJobs = map[string]string{"lint": "flutter-lint", "test": "flutter-test", "automerge": "dependabot-automerge"}
-	FlutterCINoPermJobs   = []string{"lint", "test"}
+	FlutterCIReusableJobs = map[string]string{"lint": "flutter-lint", "vuln": "flutter-vuln", "test": "flutter-test", "automerge": "dependabot-automerge"}
+	FlutterCINoPermJobs   = []string{"lint", "vuln", "test"}
 )
 
 // Files that select and pin the Flutter profile.
@@ -155,12 +156,24 @@ const (
 	HookWorkflowSync  = "workflow-sync"
 	HookGoVuln        = "go-vuln"
 	HookPyVuln        = "py-vuln"
+	HookFlutterVuln   = "flutter-vuln"
 	HookCheckCoverage = "check-coverage"
 	HookConventional  = "conventional-pre-commit"
 
 	MakeSetupLine = "pre-commit install --install-hooks"
 	VulnRecipe    = "pre-commit run go-vuln --hook-stage manual"
 	PyVulnRecipe  = "pre-commit run py-vuln --hook-stage manual"
+
+	FlutterVulnRecipe = "pre-commit run flutter-vuln --hook-stage manual"
+
+	// Local Dart hooks the Flutter profile requires (precommit-dart-hooks).
+	HookDartFormat   = "dart-format"
+	HookDartAnalyze  = "dart-analyze"
+	HookFlutterTest  = "flutter-test"
+	DartFormatEntry  = "dart format --set-exit-if-changed ."
+	DartAnalyzeEntry = "dart analyze --fatal-infos"
+	// The env prefix keeps a worktree push from reporting SDK 0.0.0-unknown.
+	FlutterTestEntry = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test"
 
 	RuffHookRepo = "https://github.com/astral-sh/ruff-pre-commit"
 

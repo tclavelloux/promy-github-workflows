@@ -120,16 +120,21 @@ var docsProfile = &profile{
 	dependabotTp: "add it with a github-actions entry at \"/\" (see templates/docs/dependabot.yml)",
 }
 
-// flutterProfile has no vuln, coverage or test-hook rules yet: those wait for
-// their own workflows and hooks.
+// flutterProfile has no coverage or no-test-hook rules yet: those wait for the
+// coverage workflow and its check-coverage hook. Its local flutter-test hook is
+// required meanwhile (precommit-dart-hooks).
 var flutterProfile = &profile{
 	name:         "flutter",
 	requiredJobs: FlutterCIRequiredJobs,
 	optionalJobs: FlutterCIOptionalJobs,
 	reusableJobs: FlutterCIReusableJobs,
 	noPermJobs:   FlutterCINoPermJobs,
-	ciMissing:    "with jobs lint, test, gitleaks; see templates/flutter/ci.yml",
-	precommitTpl: "templates/docs/pre-commit-config.yaml",
+	vulnHook:     HookFlutterVuln,
+	vulnRecipe:   FlutterVulnRecipe,
+	vulnMkTmpl:   "templates/flutter/Makefile",
+	vulnPCTmpl:   "templates/flutter/pre-commit-config.yaml",
+	ciMissing:    "with jobs lint, vuln, test, gitleaks; see templates/flutter/ci.yml",
+	precommitTpl: "templates/flutter/pre-commit-config.yaml",
 	dependabotTp: "add it with pub and github-actions entries at \"/\" (see templates/flutter/dependabot.yml)",
 	vulnFix:      vulnFixForbidden,
 }

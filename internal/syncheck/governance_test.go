@@ -279,3 +279,42 @@ func TestTemplatesPythonPins(t *testing.T) {
 		t.Errorf("%s has no %s entry", rel, u)
 	}
 }
+
+func TestPreCommitHooksFlutterVuln(t *testing.T) {
+	const rel = ".pre-commit-hooks.yaml"
+	var hook *yaml.Node
+	for _, h := range govYAML(t, rel).Content {
+		if scalar(val(h, "id")) == HookFlutterVuln {
+			hook = h
+		}
+	}
+	if hook == nil {
+		t.Fatalf("%s has no %q hook (policy.go HookFlutterVuln)", rel, HookFlutterVuln)
+	}
+	if st, ok := strSet(val(hook, "stages")); !ok || !sameSet(st, setOf("pre-push", "manual")) {
+		t.Errorf("%s %s stages = %s, want {manual, pre-push} (FlutterVulnRecipe runs --hook-stage manual)", rel, HookFlutterVuln, fmtSet(st))
+	}
+	entry := scalar(val(hook, "entry"))
+	info, err := os.Stat(filepath.Join("..", "..", filepath.FromSlash(entry)))
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Errorf("%s %s entry %q must be an executable file (language: script): %v", rel, HookFlutterVuln, entry, err)
+	}
+}
+
+// The Flutter template pins the governance hooks at an immutable tag.
+func TestTemplatesFlutterPins(t *testing.T) {
+	const rel = "templates/flutter/pre-commit-config.yaml"
+	found := false
+	for _, r := range readPCRepos(govYAML(t, rel)) {
+		if normRepoURL(r.url) != GovernanceHookRepoURL {
+			continue
+		}
+		found = true
+		if !immutableHookRev.MatchString(scalar(r.rev)) {
+			t.Errorf("%s governance rev = %q, want hooks/vX.Y.Z", rel, scalar(r.rev))
+		}
+	}
+	if !found {
+		t.Errorf("%s has no %s entry", rel, GovernanceHookRepoURL)
+	}
+}
