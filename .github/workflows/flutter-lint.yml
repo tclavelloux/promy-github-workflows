@@ -49,13 +49,16 @@ jobs:
           cache: true
 
       - name: Install dependencies
+        id: deps
         run: flutter pub get --enforce-lockfile
 
       - name: Check formatting
         run: dart format --set-exit-if-changed .
 
+      # Runs after a format failure, never after a failed setup: without the SDK or
+      # resolved packages it only buries the root cause under unresolved imports.
       - name: Analyze
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: dart analyze --fatal-infos
 
       # Policy and code come from the caller's immutable hook `rev:`, so the local

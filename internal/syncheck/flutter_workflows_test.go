@@ -131,3 +131,30 @@ func TestFlutterLintRunsWorkflowSync(t *testing.T) {
 		t.Errorf("%s must run `pre-commit run workflow-sync`", rel)
 	}
 }
+
+// Analyze still reports after a format failure, but never after a failed setup:
+// without the SDK or packages it only buries the root cause.
+func TestFlutterLintAnalyzeNeedsDeps(t *testing.T) {
+	const rel = ".github/workflows/flutter-lint.yml"
+	var deps, analyze *yaml.Node
+	for _, step := range path(govYAML(t, rel), "jobs", "lint", "steps").Content {
+		step = deref(step)
+		switch {
+		case strings.Contains(scalar(val(step, "run")), "pub get"):
+			deps = step
+		case strings.Contains(scalar(val(step, "run")), "dart analyze"):
+			analyze = step
+		}
+	}
+	if deps == nil || analyze == nil {
+		t.Fatalf("%s: want a `pub get` step and a `dart analyze` step", rel)
+	}
+	id := scalar(val(deps, "id"))
+	if id == "" {
+		t.Fatalf("%s: the `pub get` step needs an id so Analyze can gate on it", rel)
+	}
+	cond := normExpr(scalar(val(analyze, "if")))
+	if !strings.Contains(cond, "steps."+id+".outcome == 'success'") || !strings.Contains(cond, "!cancelled()") {
+		t.Errorf("%s Analyze if = %q; want !cancelled() && steps.%s.outcome == 'success'", rel, cond, id)
+	}
+}
