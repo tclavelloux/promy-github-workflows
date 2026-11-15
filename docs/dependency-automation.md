@@ -1,6 +1,6 @@
 # Dependency and vulnerability automation
 
-- No PAT, by choice. Everything runs on `GITHUB_TOKEN`, except vuln-fix and release PRs and the automerge rebase request: the fleet GitHub App (`promy-fleet-bot`) opens or comments on them so CI runs.
+- No PAT, by choice. Everything runs on `GITHUB_TOKEN`, except vuln-fix and release PRs, the automerge rebase request and the `GoTestCoverageVersion` sync commit (`coverage-pin-sync.yml`): the fleet GitHub App (`promy-fleet-bot`) opens, commits to or comments on them so CI runs.
 - Ruleset `protect-main` on every repo: PR required, squash only, required checks (including `lint / lint`, which carries `workflow-sync`), Admin-only bypass.
 
 ## Pieces
