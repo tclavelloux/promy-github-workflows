@@ -35,6 +35,7 @@ All are called at job level and grant `contents: read` unless stated. Never path
 | [`python-*.yml`](#python-workflows) | lint, typecheck, vuln, test (superseded by `python-ci`), docker for uv projects | Python |
 | [`docs-lint.yml`](#docs-lintyml) | `workflow-sync` for a repo with no code | Docs |
 | [`flutter-lint.yml`](#flutter-lintyml) | `dart format`, `dart analyze --fatal-infos`, `workflow-sync` | Flutter |
+| [`flutter-vuln.yml`](#flutter-vulnyml) | osv-scanner over the root `pubspec.lock` | Flutter |
 | [`flutter-test.yml`](#flutter-testyml) | `flutter test --coverage` with `lcov.info` upload | Flutter |
 | [`pr-title.yml`](#pr-titleyml) | Conventional Commits PR title | All |
 | [`release-please.yml`](#release-pleaseyml) | Release PR, tag, GitHub release | All |
@@ -280,7 +281,7 @@ jobs:
 - Input `workflow-sync` (boolean, default `false`; rule `ci-lint-sync` requires `true`). Runs the `workflow-sync` hook as the last step, even after an earlier failure; needs `- id: workflow-sync` in `.pre-commit-config.yaml`.
 - `.flutter-version`: one plain `X.Y.Z` (a leading `v` is dropped). Missing, empty or malformed fails the run; there is no `latest` fallback. The file must equal the fleet pin (rule `flutter-version`). `subosito/flutter-action` cannot read this file itself, so a resolve step passes the value as `flutter-version`.
 - Steps: `flutter pub get --enforce-lockfile` (a stale `pubspec.lock` fails), `dart format --set-exit-if-changed .`, `dart analyze --fatal-infos`. Format and analyze both report.
-- Start from `templates/flutter/`.
+- Start from `templates/flutter/`: `ci.yml`, `pre-commit-config.yaml` (the local `dart-format`, `dart-analyze` and `flutter-test` hooks that rule `precommit-dart-hooks` requires), `Makefile`, `dependabot.yml`.
 
 ### `flutter-test.yml`
 
@@ -296,6 +297,21 @@ test:
 - Same SDK resolution and `pub get --enforce-lockfile` as `flutter-lint`.
 - Runs `flutter test --coverage`, then uploads artifact `coverage-lcov` (`coverage/lcov.info`, 1 day, `if-no-files-found: error`). Nothing gates the artifact yet.
 - Inputs: `timeout-minutes` (required, number).
+
+### `flutter-vuln.yml`
+
+`osv-scanner scan source --lockfile pubspec.lock`. No reachability analysis: any advisory in the lock fails, minus ignores. Check name `vuln / vuln`. No secrets, no Flutter SDK.
+
+```yaml
+vuln:
+  if: github.event.pull_request.draft == false
+  uses: tclavelloux/promy-github-workflows/.github/workflows/flutter-vuln.yml@flutter-vuln/v1
+```
+
+- Scans the root `pubspec.lock` only; a missing lock fails the job instead of passing with nothing scanned.
+- Config: root `osv-scanner.toml`, else none. Each ignore needs `id`, `reason`, `ignoreUntil` within 90 days (rule `osv-ignore-expiry`).
+- Inputs `osv-scanner-version`, `osv-scanner-sha256` and `args`. The binary is rejected unless its sha256 equals `osv-scanner-sha256`; the defaults equal `python-vuln.yml`'s.
+- Local twin: the `flutter-vuln` hook and `make vuln`.
 
 ### `pr-title.yml`
 
@@ -372,7 +388,7 @@ Defaults are the Go behaviour. A uv repo adds:
         numpy
 ```
 
-A Flutter repo passes no `ecosystems`, so pub bumps stay human-reviewed: Dependabot labels a `0.x` minor bump semver-minor although caret treats it as breaking, and the Flutter profile has no coverage or vuln gate yet. Revisit once `flutter-coverage` and `flutter-vuln` land.
+A Flutter repo passes no `ecosystems`, so pub bumps stay human-reviewed: Dependabot labels a `0.x` minor bump semver-minor although caret treats it as breaking.
 
 A refusal exits 0 with a `::notice` and a step summary. A branch behind its base under a strict ruleset, or a refused merge, also ends green; with the App secrets, a Dependabot PR gets an App-authored `@dependabot rebase`. Details and the excluded-dependency rationale: [docs/dependency-automation.md](docs/dependency-automation.md#stale-branches).
 
@@ -407,11 +423,11 @@ repos:
     rev: hooks/vX.Y.Z   # latest immutable tag; never hooks/v1
     hooks:
       - id: no-direct-commit-to-main
-      - id: go-vuln        # Go repos; Python repos use py-vuln
+      - id: go-vuln        # Go repos; Python repos use py-vuln, Flutter repos flutter-vuln
       - id: workflow-sync
 ```
 
-Rule `precommit-governance-repo` requires this entry with an immutable rev and both `no-direct-commit-to-main` and `workflow-sync`. Rule `vuln-target` requires `go-vuln`/`py-vuln` iff the Makefile has a `vuln:` target.
+Rule `precommit-governance-repo` requires this entry with an immutable rev and both `no-direct-commit-to-main` and `workflow-sync`. Rule `vuln-target` requires `go-vuln`/`py-vuln`/`flutter-vuln` iff the Makefile has a `vuln:` target.
 
 ### `no-direct-commit-to-main`
 
@@ -442,6 +458,15 @@ osv-scanner over every tracked `uv.lock`, with `python-vuln.yml`'s config lookup
 - Version: `.osv-scanner-version` at the pinned `rev:` (`OSV_SCANNER_VERSION` overrides). Installed with `go install`, so Go must be on `PATH`.
 - Blocks a push that changes a `uv.lock`, `pyproject.toml` or `osv-scanner.toml`; warns otherwise; `manual`, `make vuln`, `--all-files` block. `PY_VULN_MODE=block|warn` overrides.
 - `make vuln` target: `templates/python/Makefile`. Bypass once: `SKIP=py-vuln git push`.
+
+### `flutter-vuln`
+
+osv-scanner over the tracked root `pubspec.lock`, with `flutter-vuln.yml`'s config. Stages `pre-push`, `manual`.
+
+- Version: `.osv-scanner-version` at the pinned `rev:` (`OSV_SCANNER_VERSION` overrides). Installed with `go install`, so Go must be on `PATH`.
+- Blocks a push that changes `pubspec.lock`, `pubspec.yaml` or `osv-scanner.toml`; warns otherwise; `manual`, `make vuln`, `--all-files` block. `FLUTTER_VULN_MODE=block|warn` overrides.
+- No tracked `pubspec.lock`: exits 0.
+- `make vuln` target: `templates/flutter/Makefile`. Bypass once: `SKIP=flutter-vuln git push`.
 
 ### `workflow-sync`
 

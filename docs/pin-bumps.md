@@ -52,7 +52,7 @@ ruff:
 osv-scanner:
 
 1. Take the `linux_amd64` line from the release's `osv-scanner_SHA256SUMS`.
-2. Edit in one PR: version and sha256 defaults in `python-vuln.yml`, `python-ci.yml` and `python-vuln-fix.yml`, `.osv-scanner-version`, `OSVScannerVersion` in `policy.go`.
+2. Edit in one PR: version and sha256 defaults in `python-vuln.yml`, `python-ci.yml`, `python-vuln-fix.yml` and `flutter-vuln.yml`, `.osv-scanner-version`, `OSVScannerVersion` in `policy.go`.
 3. The sha256 is not a manifest entry because it is not a version. It moves with the version: a stale digest fails the job closed.
 
 govulncheck:
@@ -79,11 +79,11 @@ actionlint, zizmor:
 
 Governance hooks rev:
 
-1. Governance PR: `rev:` in `templates/python/pre-commit-config.yaml`.
+1. Governance PR: `rev:` in `templates/python/pre-commit-config.yaml` and `templates/flutter/pre-commit-config.yaml`.
 2. Each consumer: `pre-commit autoupdate --repo https://github.com/tclavelloux/promy-github-workflows`.
 3. Never use the moving `hooks/v1`.
 
-Template revs (pre-commit-hooks, conventional-pre-commit, gitleaks, uv-pre-commit, ruff-pre-commit):
+Template revs (pre-commit-hooks, conventional-pre-commit, gitleaks in the Python and Flutter templates; uv-pre-commit, ruff-pre-commit in the Python template):
 
 1. Governance PR first: the template is a tested `workflow-sync` pass case.
 2. `pre-commit autoupdate --repo <url>`, then restore the uv and ruff revs to match `.uv-version` and `.ruff-version`.
