@@ -39,6 +39,7 @@ All are called at job level and grant `contents: read` unless stated. Never path
 | [`dependabot-automerge.yml`](#dependabot-automergeyml) | Squash-merge green bot PRs | All |
 | [`go-vuln-fix.yml`, `python-vuln-fix.yml`](#vuln-fix) | Weekly `fix(deps)` PR for advisories | Go, Python |
 | [`pin-drift.yml`](#pin-driftyml) | Monthly issue for pins behind upstream | This repo only |
+| [`coverage-pin-sync.yml`](#coverage-pin-syncyml) | Sync `GoTestCoverageVersion` on Dependabot go-test-coverage bumps | This repo only |
 
 ### Docs-only and release PRs
 
@@ -351,6 +352,13 @@ Copy the caller to `.github/workflows/vuln-fix.yml` from `templates/go-vuln-fix-
 ### `pin-drift.yml`
 
 Not reusable. Monthly and on `workflow_dispatch`, compares every pin in `pin-manifest.json` with upstream and keeps one rolling issue (`<!-- pin-drift -->`). Detect-only. Manifest and bump procedures: [docs/pin-bumps.md](docs/pin-bumps.md).
+
+### `coverage-pin-sync.yml`
+
+Not reusable. Runs on Dependabot PRs that bump `vladopajic/go-test-coverage`. `promy-fleet-bot` commits the matching `GoTestCoverageVersion` change to `policy.go` (via `scripts/coverage-pin-sync.sh`) and comments that a human must merge.
+
+- Needs `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as Dependabot secrets: Dependabot-triggered runs do not see Actions secrets. Without them the job fails with an error naming the fix.
+- Never automerged. The bump forces a fleet Makefile rollout: [docs/pin-bumps.md](docs/pin-bumps.md).
 
 ## Pre-commit hooks
 
