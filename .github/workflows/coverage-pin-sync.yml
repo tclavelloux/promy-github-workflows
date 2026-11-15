@@ -1,0 +1,110 @@
+# Governance-internal, not reusable: no tag, no WorkflowMajors entry.
+# Dependabot bumps only the go-test-coverage action SHA in go-coverage.yml; policy.go
+# GoTestCoverageVersion must equal it (TestPolicyGoTestCoverageVersion). This workflow has
+# promy-fleet-bot commit that one-line sync onto the Dependabot branch, so workflow-sync
+# goes green. A human still merges: the bump forces a fleet Makefile rollout.
+# Secrets: a pull_request run triggered by Dependabot sees only Dependabot secrets, so
+# APP_CLIENT_ID and APP_PRIVATE_KEY must exist as Dependabot secrets in this repo.
+name: Coverage pin sync
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # Secrets cannot be read in a step `if:`; expose whether both are set.
+      HAS_APP: ${{ secrets.APP_CLIENT_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
+    # Same-repo Dependabot branch for this one dependency. A fork PR can spoof neither
+    # the user login nor a head repo equal to this one.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && startsWith(github.event.pull_request.head.ref, 'dependabot/github_actions/vladopajic/go-test-coverage-')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      # No secrets in this step: it runs a script from the checked-out PR branch.
+      - name: Sync GoTestCoverageVersion
+        id: sync
+        run: scripts/coverage-pin-sync.sh .github/workflows/go-coverage.yml internal/syncheck/policy.go
+
+      - name: Require App credentials
+        if: steps.sync.outputs.changed == 'true' && env.HAS_APP != 'true'
+        run: |
+          echo "::error title=coverage-pin-sync::APP_CLIENT_ID and APP_PRIVATE_KEY are not available. Add both as Dependabot secrets (gh secret set <name> --app dependabot), since Dependabot-triggered runs do not see Actions secrets."
+          exit 1
+
+      # A failed mint fails the job: a broken key must be visible.
+      - name: Create GitHub App token
+        id: app-token
+        if: steps.sync.outputs.changed == 'true' && env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # createCommitOnBranch: GitHub signs the commit and no git credential is written
+      # to disk. The App push triggers `synchronize`, so CI re-runs; that run finds
+      # the const already equal (changed=false) and stops.
+      - name: Commit the sync
+        if: steps.sync.outputs.changed == 'true' && steps.app-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          VERSION: ${{ steps.sync.outputs.version }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg query 'mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }' \
+            --arg repo "$REPO" \
+            --arg branch "$BRANCH" \
+            --arg oid "$HEAD_SHA" \
+            --arg headline "build(deps): sync GoTestCoverageVersion to $VERSION" \
+            --arg policy "$(base64 < internal/syncheck/policy.go | tr -d '\n')" \
+            '{query: $query, variables: {input: {
+               branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+               expectedHeadOid: $oid,
+               message: {headline: $headline},
+               fileChanges: {additions: [{path: "internal/syncheck/policy.go", contents: $policy}]}}}}' \
+            > "$RUNNER_TEMP/commit.json"
+          gh api graphql --input "$RUNNER_TEMP/commit.json" > "$RUNNER_TEMP/commit-result.json"
+          jq -e '.data.createCommitOnBranch.commit.oid' "$RUNNER_TEMP/commit-result.json" > /dev/null
+
+      - name: Flag for human merge
+        if: steps.sync.outputs.changed == 'true' && steps.app-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          VERSION: ${{ steps.sync.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$(cat <<EOF
+          **Fleet pin change: human merge required.** \`GoTestCoverageVersion\` was synced to \`$VERSION\` by \`coverage-pin-sync.yml\`.
+          Merging changes the go-test-coverage version every Go repo must install (\`install-go-test-coverage\` in each Makefile). After merging:
+          - Cut the governance tags.
+          - Roll the new Makefile pin out through \`workflow-sync\`.
+          EOF
+          )"

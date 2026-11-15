@@ -67,9 +67,10 @@ golangci-lint:
 
 go-test-coverage:
 
-1. Governance, one PR: bump the action SHA in `go-coverage.yml` and `GoTestCoverageVersion` in `policy.go` together. Dependabot bumps only the SHA, so merge its PR only with the constant, or replace it.
+1. Governance, Dependabot PR: [`coverage-pin-sync.yml`](../.github/workflows/coverage-pin-sync.yml) has `promy-fleet-bot` commit the `GoTestCoverageVersion` sync and comment that a human must merge. Requires `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as Dependabot secrets; without them the job fails red.
+   - By hand: bump the action SHA in `go-coverage.yml` and `GoTestCoverageVersion` in `policy.go` in one PR.
 2. Resolve the SHA: `gh api repos/vladopajic/go-test-coverage/git/ref/tags/vX.Y.Z`. When `object.type` is `tag` (annotated), dereference: `gh api repos/vladopajic/go-test-coverage/git/tags/<sha>` and use `object.sha`.
-3. Every Go consumer: Makefile `go install github.com/vladopajic/go-test-coverage/v2@vX.Y.Z`.
+3. After merging, cut the governance tags, then roll the Makefile pin out to every Go consumer through `workflow-sync`: `go install github.com/vladopajic/go-test-coverage/v2@vX.Y.Z` in `install-go-test-coverage`.
 
 actionlint, zizmor:
 
