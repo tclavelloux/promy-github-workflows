@@ -95,6 +95,9 @@
         {
           "file": "internal/syncheck/policy.go",
           "const": "FlutterVersion"
+        },
+        {
+          "file": "internal/syncheck/testdata/pass-flutter/.flutter-version"
         }
       ]
     },

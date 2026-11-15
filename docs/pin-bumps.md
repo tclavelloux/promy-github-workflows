@@ -91,5 +91,5 @@ Template revs (pre-commit-hooks, conventional-pre-commit, gitleaks, uv-pre-commi
 
 Flutter SDK:
 
-1. Governance PR: `FlutterVersion` in `policy.go` and `internal/syncheck/testdata/pass-flutter/.flutter-version` together.
+1. Governance PR: `FlutterVersion` in `policy.go` and `internal/syncheck/testdata/pass-flutter/.flutter-version` together (both are `flutter` manifest locations, so pin-drift reports a disagreement).
 2. Each Flutter consumer: `.flutter-version`, in the PR that bumps `rev:` to the `hooks/vX.Y.Z` carrying the new policy.
