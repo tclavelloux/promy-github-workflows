@@ -1,0 +1,74 @@
+# Canonical .pre-commit-config.yaml for a Flutter repo (workflow-sync Flutter
+# profile). Run `make setup` once after cloning.
+#
+# `pre-commit install` only writes the hook types listed here. Without this line it
+# writes .git/hooks/pre-commit alone, and the commit-msg and pre-push stages never fire.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+# Hooks that declare no `stages` would otherwise also run at commit-msg and pre-push.
+default_stages: [pre-commit]
+
+repos:
+  # Pin rev to the immutable tag (hooks/vX.Y.Z), never the moving `hooks/v1`.
+  - repo: https://github.com/tclavelloux/promy-github-workflows
+    rev: hooks/v1.16.0
+    hooks:
+      - id: no-direct-commit-to-main
+      - id: flutter-vuln
+      - id: workflow-sync
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # The manifest declares pre-push on these hooks; default_stages does not override it.
+      - id: check-added-large-files
+        stages: [pre-commit]
+        args: [--maxkb=1024]
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.5.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args:
+          - feat
+          - fix
+          - docs
+          - style
+          - refactor
+          - perf
+          - test
+          - build
+          - ci
+          - chore
+          - revert
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # Same commands as the CI `lint` and `test` jobs. The env prefix on flutter-test
+  # keeps a worktree push from reporting SDK 0.0.0-unknown.
+  - repo: local
+    hooks:
+      - id: dart-format
+        name: dart format
+        entry: dart format --set-exit-if-changed .
+        language: system
+        types: [dart]
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: dart-analyze
+        name: dart analyze
+        entry: dart analyze --fatal-infos
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: flutter-test
+        name: flutter test
+        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE flutter test
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

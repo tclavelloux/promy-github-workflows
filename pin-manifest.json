@@ -126,7 +126,7 @@
       ]
     },
     {
-      "name": "governance hooks rev (python template)",
+      "name": "governance hooks rev (python and flutter templates)",
       "upstream": {
         "repo": "tclavelloux/promy-github-workflows",
         "kind": "tag",
@@ -136,11 +136,15 @@
         {
           "file": "templates/python/pre-commit-config.yaml",
           "pattern": "promy-github-workflows\\n\\s*rev:\\s*hooks/v(\\S+)"
+        },
+        {
+          "file": "templates/flutter/pre-commit-config.yaml",
+          "pattern": "promy-github-workflows\\n\\s*rev:\\s*hooks/v(\\S+)"
         }
       ]
     },
     {
-      "name": "pre-commit-hooks (python template)",
+      "name": "pre-commit-hooks (python and flutter templates)",
       "upstream": {
         "repo": "pre-commit/pre-commit-hooks",
         "kind": "release"
@@ -149,11 +153,15 @@
         {
           "file": "templates/python/pre-commit-config.yaml",
           "pattern": "pre-commit/pre-commit-hooks\\n\\s*rev:\\s*v?(\\S+)"
+        },
+        {
+          "file": "templates/flutter/pre-commit-config.yaml",
+          "pattern": "pre-commit/pre-commit-hooks\\n\\s*rev:\\s*v?(\\S+)"
         }
       ]
     },
     {
-      "name": "conventional-pre-commit (python template)",
+      "name": "conventional-pre-commit (python and flutter templates)",
       "upstream": {
         "repo": "compilerla/conventional-pre-commit",
         "kind": "release"
@@ -162,11 +170,15 @@
         {
           "file": "templates/python/pre-commit-config.yaml",
           "pattern": "compilerla/conventional-pre-commit\\n\\s*rev:\\s*v?(\\S+)"
+        },
+        {
+          "file": "templates/flutter/pre-commit-config.yaml",
+          "pattern": "compilerla/conventional-pre-commit\\n\\s*rev:\\s*v?(\\S+)"
         }
       ]
     },
     {
-      "name": "gitleaks (python template)",
+      "name": "gitleaks (python and flutter templates)",
       "upstream": {
         "repo": "gitleaks/gitleaks",
         "kind": "release"
@@ -174,6 +186,10 @@
       "locations": [
         {
           "file": "templates/python/pre-commit-config.yaml",
+          "pattern": "gitleaks/gitleaks\\n\\s*rev:\\s*v?(\\S+)"
+        },
+        {
+          "file": "templates/flutter/pre-commit-config.yaml",
           "pattern": "gitleaks/gitleaks\\n\\s*rev:\\s*v?(\\S+)"
         }
       ]

@@ -1,11 +1,12 @@
 # Canonical .github/workflows/ci.yml for a Flutter repo (workflow-sync Flutter
 # profile: a root pubspec.yaml, no go.mod, no uv.lock).
 #
-# - Required jobs: lint, test, gitleaks. automerge is optional.
+# - Required jobs: lint, vuln, test, gitleaks. automerge is optional.
 # - `lint` calls flutter-lint and `test` calls flutter-test. Both install the SDK
 #   from the repo's .flutter-version, which must equal the fleet pin.
-# - Check names are fixed by the reusable workflows: `lint / lint` and
-#   `test / test`. Add both to the protect-main required checks.
+# - `vuln` calls flutter-vuln: osv-scanner over the root pubspec.lock, no SDK.
+# - Check names are fixed by the reusable workflows: `lint / lint`, `vuln / vuln`
+#   and `test / test`. Add all three to the protect-main required checks.
 # - Never path-filter a job: a required check that does not run blocks the PR.
 name: CI
 
@@ -27,6 +28,10 @@ jobs:
     uses: tclavelloux/promy-github-workflows/.github/workflows/flutter-lint.yml@flutter-lint/v1
     with:
       workflow-sync: true
+
+  vuln:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/flutter-vuln.yml@flutter-vuln/v1
 
   test:
     if: github.event.pull_request.draft == false
@@ -57,7 +62,7 @@ jobs:
   # List EVERY other job in `needs:`. The in-workflow check-run verification is
   # the backstop, not the primary gate.
   automerge:
-    needs: [lint, test, gitleaks]
+    needs: [lint, vuln, test, gitleaks]
     # No status function here, so GitHub implicitly ANDs success(): any failed,
     # cancelled or skipped need skips this job.
     if: github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'
@@ -69,8 +74,8 @@ jobs:
       actions: read
       statuses: read
     uses: tclavelloux/promy-github-workflows/.github/workflows/dependabot-automerge.yml@dependabot-automerge/v1
-    # No `with: ecosystems: pub`: pub bumps stay human-reviewed until the Flutter
-    # coverage gate and vuln scan land (a 0.x minor bump is breaking under caret).
+    # No `with: ecosystems: pub`: pub bumps stay human-reviewed (a 0.x minor bump
+    # is breaking under caret).
     # Optional. With them, a Dependabot PR left behind its base under a strict
     # ruleset gets an App-authored `@dependabot rebase` comment; without them the
     # job only prints a notice. Map explicitly; never `secrets: inherit`.
