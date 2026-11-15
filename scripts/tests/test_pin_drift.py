@@ -120,6 +120,11 @@ class LatestTests(unittest.TestCase):
         up = {"repo": "o/r", "kind": "tag", "prefix": "hooks/v"}
         self.assertEqual(pd.latest_version(up, make_fetch(tags={"o/r": refs})), "1.6.0")
 
+    def test_tag_empty_prefix(self):
+        refs = ["refs/tags/3.47.9", "refs/tags/3.50.0", "refs/tags/3.51.0-0.1.pre", "refs/tags/v1.0.0"]
+        up = {"repo": "o/r", "kind": "tag", "prefix": ""}
+        self.assertEqual(pd.latest_version(up, make_fetch(tags={"o/r": refs})), "3.50.0")
+
     def test_tag_many_refs_single_request(self):
         refs = [f"refs/tags/v0.{i}.0" for i in range(250)] + ["refs/tags/v3.0.0"]
         up = {"repo": "o/r", "kind": "tag", "prefix": "v"}

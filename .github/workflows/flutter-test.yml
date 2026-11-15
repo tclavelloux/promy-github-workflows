@@ -1,0 +1,62 @@
+name: Flutter Test
+
+# Installs the Flutter SDK from the caller's .flutter-version (one plain X.Y.Z),
+# then runs `flutter test --coverage`. Check name: `test / test`.
+#
+# Contract for the future flutter-coverage.yml: this workflow uploads the artifact
+# `coverage-lcov` holding `lcov.info` (from coverage/lcov.info), retained one day.
+
+on:
+  workflow_call:
+    inputs:
+      timeout-minutes:
+        description: Job timeout in minutes, required; size it to the repo suite so a hung test cannot burn the minutes budget.
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve Flutter version
+        id: flutter
+        run: |
+          # .flutter-version is the repo's pin; a missing pin is an error, never "latest".
+          if [ ! -s .flutter-version ]; then
+            echo "::error file=.flutter-version::.flutter-version is missing or empty. It is the source of truth for the Flutter SDK version."
+            exit 1
+          fi
+          version="$(head -n1 .flutter-version | tr -d '[:space:]')"
+          version="${version#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error file=.flutter-version::.flutter-version must hold one plain version such as 3.50.0, found '${version}'."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Run tests
+        run: flutter test --coverage
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          retention-days: 1
+          if-no-files-found: error

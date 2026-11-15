@@ -1,0 +1,42 @@
+# Canonical .github/dependabot.yml for a Flutter repo (workflow-sync Flutter
+# profile). workflow-sync requires pub and github-actions entries at "/".
+#
+# - `prefix: build` pins the `build(deps):` title; pr-title.yml accepts it.
+# - Majors sit outside every group: each stays an individual PR for human validation.
+# - The github-actions group needs a human merge: GITHUB_TOKEN cannot merge
+#   changes to workflow files.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Paris
+    commit-message:
+      prefix: build
+      include: scope
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: pub
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Paris
+    commit-message:
+      prefix: build
+      include: scope
+    cooldown:
+      default-days: 3
+    groups:
+      pub:
+        patterns: ["*"]
+        update-types: [minor, patch]

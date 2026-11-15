@@ -21,6 +21,11 @@ const (
 	OSVScannerVersion = "2.7.0"  // python-vuln.yml osv-scanner-version default, .osv-scanner-version (py-vuln hook)
 	UVVersion         = "0.13.5" // fleet uv pin; templates/python/pre-commit-config.yaml uv-pre-commit rev
 
+	// FlutterVersion is the fleet Flutter SDK. The Flutter profile requires
+	// .flutter-version to equal it; flutter-lint and flutter-test install the SDK
+	// from that file.
+	FlutterVersion = "3.50.0"
+
 	// OSVIgnoreMaxDays bounds every osv-scanner ignore: Python has no
 	// reachability analysis, so an ignore must expire and be re-triaged.
 	OSVIgnoreMaxDays = 90
@@ -52,6 +57,8 @@ var WorkflowMajors = map[string]int{
 	"python-docker":        1,
 	"python-vuln-fix":      1,
 	"docs-lint":            1,
+	"flutter-lint":         1,
+	"flutter-test":         1,
 	"release-please":       1,
 }
 
@@ -100,6 +107,21 @@ var (
 	DocsCIForbiddenJobs = []string{"test", "coverage", "vuln", "docker", "typecheck"}
 	DocsCIReusableJobs  = map[string]string{"lint": "docs-lint", "automerge": "dependabot-automerge"}
 	DocsCINoPermJobs    = []string{"lint"}
+)
+
+// Job sets of ci.yml in the Flutter profile. automerge is optional, as in the
+// other profiles; coverage and vuln are unknown jobs until their workflows land.
+var (
+	FlutterCIRequiredJobs = []string{"lint", "test", "gitleaks"}
+	FlutterCIOptionalJobs = []string{"automerge"}
+	FlutterCIReusableJobs = map[string]string{"lint": "flutter-lint", "test": "flutter-test", "automerge": "dependabot-automerge"}
+	FlutterCINoPermJobs   = []string{"lint", "test"}
+)
+
+// Files that select and pin the Flutter profile.
+const (
+	FlutterSignalFile  = "pubspec.yaml"
+	FlutterVersionFile = ".flutter-version"
 )
 
 // ProfileMarkerFile selects the docs profile; its content is DocsProfileName.

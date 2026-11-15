@@ -5,12 +5,12 @@
 | Where | What | Trigger |
 |---|---|---|
 | Local hook | `workflow-sync` from `.pre-commit-hooks.yaml`, built with the system `go` (`language: golang`) | `pre-commit` stage on every commit; `pre-commit run workflow-sync --all-files` by hand |
-| CI | `Check fleet governance (workflow-sync)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml` or `python-ci.yml` (matrix index 0 only); the only step of `docs-lint.yml` | Go/Python caller sets `with: workflow-sync: true` on its `lint` job (Python `check` job when it uses `python-ci.yml`); docs caller's `lint` job calls `docs-lint.yml` (no input) |
+| CI | `Check fleet governance (workflow-sync)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml`, `python-ci.yml` (matrix index 0 only) or `flutter-lint.yml`; the only step of `docs-lint.yml` | Go/Python/Flutter caller sets `with: workflow-sync: true` on its `lint` job (Python `check` job when it uses `python-ci.yml`); docs caller's `lint` job calls `docs-lint.yml` (no input) |
 | By hand | `scripts/check-repo-settings.sh` | `GH_TOKEN= scripts/check-repo-settings.sh [owner/repo ...]` |
 | Governance repo CI | `workflow-sync` job in `ci.yml`: gofmt, `go vet`, `go test` | Every PR here |
 
 - Local hook and CI step run the same code at the same immutable `rev:` of the caller's `.pre-commit-config.yaml`. Policy and checker ship together.
-- The hook needs Go on `PATH` locally. In CI, `setup-go` has already run in `go-lint`; `python-lint`, `python-ci` and `docs-lint` add it for that one step.
+- The hook needs Go on `PATH` locally. In CI, `setup-go` has already run in `go-lint`; `python-lint`, `python-ci`, `flutter-lint` and `docs-lint` add it for that one step.
 - The hook has `always_run: true`, `pass_filenames: false`, `verbose: true`. Verbose prints every exemption on success.
 - `--root DIR` checks another directory; default `.`.
 - Output: `<file>:<line>: [<rule>] <message>`. With `GITHUB_ACTIONS=true` it also emits `::error file=..,line=..,title=workflow-sync [<rule>]::<message>` annotations.
@@ -27,18 +27,22 @@ The checker picks one policy per repo before any rule runs (`internal/syncheck/p
 | 1 | A regular file `.workflow-sync-profile` at the root holding `docs` (whitespace trimmed, case-sensitive) | Docs |
 | 2 | A regular file `go.mod` at the root | Go |
 | 3 | Any tracked `uv.lock` or `pyproject.toml` | Python |
-| 4 | None | `profile` violation; nothing else is checked |
+| 4 | A regular file `pubspec.yaml` at the root | Flutter |
+| 5 | None | `profile` violation; nothing else is checked |
 
 - "Tracked" means `git ls-files` (deleted files excluded) when `--root` is the git toplevel, else a directory walk that skips `.git`, `.venv`, `venv`, `node_modules`, `__pycache__`, `.ruff_cache` (same set as `scripts/python_pins.py`).
 - The docs marker is explicit, never inferred from missing files: a repo with no code looks the same as a misconfigured one.
 - Marker plus a root `go.mod`, or plus any tracked `uv.lock`/`pyproject.toml`, is a `profile` violation naming the file. Letting the marker win would silently drop the Go/Python gates of a repo that later gains code; letting the code win would silently ignore the marker. A marker holding anything but `docs` is also a `profile` violation. Nested `go.mod` files do not count.
-- `go.mod` wins over Python files: a Go service may carry Python tooling, and the Go gates are the established set.
+- `go.mod` and a root `pubspec.yaml` each win over Python files (nested ones included): a Go service or a Flutter app may carry Python tooling.
+- A root `pubspec.yaml` plus the docs marker or a root `go.mod` is a `profile` violation naming the file: both are app or service signals, so no side wins. A nested `pubspec.yaml` does not count.
 - `profile` fails closed, so a repo the policy cannot classify never passes. Its finding names no file (`.`), so it cannot be exempted.
 - **uv project**: a directory with a tracked `uv.lock` (`.` for the root). The Python rules derive every project list from this, never from a hardcoded path.
 
 Shared by all profiles: every workflow-file rule, `ci-trigger`, `ci-concurrency`, `ci-permissions`, `ci-draft-skip`, `ci-timeout`, `ci-lint-sync`, `ci-automerge`, `pr-title`, `release-please`, all `precommit-*`, `vuln-target`, `make-setup`, `make-hookspath`, `no-githooks`. Values that differ per profile are in the tables below.
 
 The docs profile (`.workflow-sync-profile`, for a repo with no code such as promy-steering) applies every workflow-file rule, `ci-trigger`, `ci-concurrency`, `ci-permissions`, `ci-draft-skip`, `ci-timeout`, `ci-job-ref`, `ci-job-permissions`, `ci-automerge`, `pr-title`, `dependabot` (`github-actions` only), `precommit-install-types`, `precommit-default-stages`, `precommit-governance-repo`, `precommit-rev`, `precommit-commit-msg`, `make-setup`, `make-hookspath`, `no-githooks`. It skips `ci-projects`, `ci-test-artifact`, `ci-lint-sync` (`docs-lint` always runs the check), `precommit-coverage-hook`, `precommit-no-test-hook`, `vuln-target`, `make-coverage-pin`, `golangci-version`, `testcoverage`, `vuln-fix` and every Python-only rule. `release-please.yml` is optional: absent passes, present is checked like any other profile. Start from `templates/docs/`.
+
+The Flutter profile (a root `pubspec.yaml`) applies every workflow-file rule, every `ci-*` rule, `pr-title`, `release-please`, `dependabot` (`pub` and `github-actions` at `/`), `precommit-install-types`, `precommit-default-stages`, `precommit-governance-repo`, `precommit-rev`, `precommit-commit-msg`, `make-setup`, `make-hookspath`, `unpinned-tool`, `no-githooks` and `flutter-version`. It skips `ci-projects`, `precommit-coverage-hook`, `precommit-no-test-hook`, `vuln-target`, `make-coverage-pin`, `golangci-version`, `testcoverage` and every Python-only rule: those wait for the Flutter coverage and vuln workflows. `docker`, `vuln` and `coverage` are unknown `ci.yml` jobs. A `vuln-fix.yml` fails `vuln-fix`: no Flutter vuln-fix workflow exists, so the file is hand-rolled. `templates/flutter/ci.yml` passes no `ecosystems: pub` to automerge, so pub bumps stay human-reviewed until the coverage gate and vuln scan land (a `0.x` minor bump is breaking under caret, and Dependabot labels it semver-minor). Start from `templates/flutter/`; the pre-commit template of the docs profile passes every pre-commit rule this profile runs.
 
 ## Rules
 
@@ -64,13 +68,13 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | `ci-trigger` | `on` is exactly `pull_request` with `branches: [main]` and `types` = {opened, synchronize, ready_for_review, reopened}. No `push` | One run per PR head; `ready_for_review` re-runs jobs skipped while draft |
 | `ci-concurrency` | group `${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress: true` | Superseded pushes stop burning minutes |
 | `ci-permissions` | Top-level exactly `{contents: read}` | Called workflows can only narrow the caller's token |
-| `ci-jobs` | Go: required lint, vuln, test, coverage, gitleaks; `docker` required iff a root `Dockerfile` exists, forbidden otherwise. Python: required gitleaks and either the single `check` job (`python-ci.yml`) or all of lint, typecheck, vuln, test (a mix is a finding); `docker` required iff a uv project has a `Dockerfile`, forbidden otherwise. Optional in both: automerge. Docs: required lint, gitleaks; optional automerge; test, coverage, vuln, docker and typecheck are forbidden (named in the finding); anything else is unknown. No release-please requirement. Anything else is an unknown job | Same gate set in every repo of a profile |
-| `ci-job-ref` | Go: lint, vuln, docker, test, coverage `uses:` go-lint, go-vuln, go-docker, go-test, go-coverage. Python: check, lint, typecheck, vuln, test, docker `uses:` python-ci, python-lint, python-typecheck, python-vuln, python-test, python-docker. Docs: lint `uses:` docs-lint. All: automerge `uses:` dependabot-automerge. Exact governance ref | Policy majors move in one place |
+| `ci-jobs` | Go: required lint, vuln, test, coverage, gitleaks; `docker` required iff a root `Dockerfile` exists, forbidden otherwise. Python: required gitleaks and either the single `check` job (`python-ci.yml`) or all of lint, typecheck, vuln, test (a mix is a finding); `docker` required iff a uv project has a `Dockerfile`, forbidden otherwise. Optional in both: automerge. Flutter: required lint, test, gitleaks; optional automerge; anything else (docker, vuln, coverage, typecheck) is unknown. Docs: required lint, gitleaks; optional automerge; test, coverage, vuln, docker and typecheck are forbidden (named in the finding); anything else is unknown. No release-please requirement. Anything else is an unknown job | Same gate set in every repo of a profile |
+| `ci-job-ref` | Go: lint, vuln, docker, test, coverage `uses:` go-lint, go-vuln, go-docker, go-test, go-coverage. Python: check, lint, typecheck, vuln, test, docker `uses:` python-ci, python-lint, python-typecheck, python-vuln, python-test, python-docker. Docs: lint `uses:` docs-lint. Flutter: lint, test `uses:` flutter-lint, flutter-test. All: automerge `uses:` dependabot-automerge. Exact governance ref | Policy majors move in one place |
 | `ci-draft-skip` | Every job except automerge has `if: github.event.pull_request.draft == false` | Drafts do not spend minutes |
 | `ci-timeout` | Inline (`runs-on`) jobs set `timeout-minutes` (value free); the Go `test` job passes it as `with.timeout-minutes`, a required input of `go-test.yml` | A hung job cannot burn the budget |
-| `ci-job-permissions` | Go: lint, vuln, docker, test carry no `permissions:`; Python: check, lint, typecheck, vuln, test, docker carry none. Docs: lint carries none. Go coverage: exactly `{contents: read, pull-requests: write}`, `needs: test`, `secrets: inherit`. gitleaks: exactly `{contents: read, pull-requests: read}`, uses `gitleaks/gitleaks-action`, checkout `fetch-depth: 0` | Read default is the repo setting; only coverage (PR comment) and gitleaks need more |
+| `ci-job-permissions` | Go: lint, vuln, docker, test carry no `permissions:`; Python: check, lint, typecheck, vuln, test, docker carry none. Docs: lint carries none. Flutter: lint, test carry none. Go coverage: exactly `{contents: read, pull-requests: write}`, `needs: test`, `secrets: inherit`. gitleaks: exactly `{contents: read, pull-requests: read}`, uses `gitleaks/gitleaks-action`, checkout `fetch-depth: 0` | Read default is the repo setting; only coverage (PR comment) and gitleaks need more |
 | `ci-projects` | Python only. `with.projects` of check (or lint, typecheck, vuln and test) is a JSON-array string listing exactly the uv projects; docker lists exactly the uv projects with a `Dockerfile`. Entries are path-cleaned (`./src/app/` = `src/app`) | A project left out has no gate; a listed directory that is not a project fails the reusable workflow |
-| `ci-lint-sync` | Go and Python: `lint` job (Python `check` job when present) has `with.workflow-sync: true`. Not checked for docs (`docs-lint.yml` has no such input and always runs the check) | Without it CI skips this check and only the local hook guards the repo |
+| `ci-lint-sync` | Go, Python and Flutter: `lint` job (Python `check` job when present) has `with.workflow-sync: true`. Not checked for docs (`docs-lint.yml` has no such input and always runs the check) | Without it CI skips this check and only the local hook guards the repo |
 | `ci-automerge` | If present: last job; `needs` = every other job; `if` = `github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'promy-fleet-bot[bot]'`; permissions exactly `{contents: write, pull-requests: write, checks: read, actions: read, statuses: read}`; `secrets:` optional, when present exactly `{APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}, APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}}` | A job missing from `needs:` could merge past a red check; only the two App credentials (stale-branch rebase request) cross into the reusable workflow |
 
 ### Other workflow files
@@ -79,8 +83,8 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 |---|---|---|---|
 | `pr-title` | `pr-title.yml` | Exists. `on.pull_request.types` = {opened, edited, reopened, synchronize}. Top-level `{contents: read}`. One job `pr-title`, permissions `{contents: read, pull-requests: read}`, uses `pr-title/v1` | PR title is the squash commit release-please parses; without `edited` a fixed title never re-checks |
 | `release-please` | `release-please.yml` | Exists (optional for the docs profile, checked when present). `on` is exactly `push: {branches: [main]}`. Top-level `{contents: read}`. One job `release-please`, permissions exactly `{contents: write, pull-requests: write}`, uses `release-please/v1` (a local copy running `googleapis/release-please-action` fails). `secrets:` on the job is optional; when present it is exactly `{APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}, APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}}` (no `secrets: inherit`, no other key or value) | Releases cut from `main` only; one release workflow for the fleet; only the two App credentials cross into the reusable workflow, so the release PR gets CI |
-| `vuln-fix` | `vuln-fix.yml` (optional; not checked for the docs profile) | `on` = `schedule` plus optional `workflow_dispatch`. Top-level `{contents: read}`. Concurrency `{group: <workflow>, cancel-in-progress: false}`. One job `fix`, permissions exactly `{contents: write, pull-requests: write, issues: write}`, uses `<workflow>/v1`. `<workflow>` is `go-vuln-fix` for Go and `python-vuln-fix` for Python. Python also: `with.projects` is a JSON-array string listing exactly the uv projects (same parsing as `ci-projects`). `secrets:` on `fix` is optional; when present it is exactly `{APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}, APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}}` (no `secrets: inherit`, no other key or value) | A running fix is never cancelled mid-PR; no broader token; only the two App credentials cross into the reusable workflow; a Python project left out of `projects` is never patched |
-| `dependabot` | `.github/dependabot.yml` | Docs: exists with a `github-actions` entry at directory `/`. Go: exists with `gomod` and `github-actions` entries at directory `/`. Python: `github-actions` at `/`; `uv` entries whose `directory`/`directories` (globs allowed) cover every uv project; `docker` entries covering every uv project with a `Dockerfile`, each `docker` entry ignoring `ghcr.io/astral-sh/uv` unconditionally | The bump surface. Python: a Dependabot bump of the Dockerfile uv tag alone turns python-lint's uv-pin drift check red |
+| `vuln-fix` | `vuln-fix.yml` (optional; not checked for the docs profile; any such file fails in the Flutter profile, which has no governance vuln-fix workflow) | `on` = `schedule` plus optional `workflow_dispatch`. Top-level `{contents: read}`. Concurrency `{group: <workflow>, cancel-in-progress: false}`. One job `fix`, permissions exactly `{contents: write, pull-requests: write, issues: write}`, uses `<workflow>/v1`. `<workflow>` is `go-vuln-fix` for Go and `python-vuln-fix` for Python. Python also: `with.projects` is a JSON-array string listing exactly the uv projects (same parsing as `ci-projects`). `secrets:` on `fix` is optional; when present it is exactly `{APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}, APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}}` (no `secrets: inherit`, no other key or value) | A running fix is never cancelled mid-PR; no broader token; only the two App credentials cross into the reusable workflow; a Python project left out of `projects` is never patched |
+| `dependabot` | `.github/dependabot.yml` | Flutter: exists with `pub` and `github-actions` entries at directory `/`. Docs: exists with a `github-actions` entry at directory `/`. Go: exists with `gomod` and `github-actions` entries at directory `/`. Python: `github-actions` at `/`; `uv` entries whose `directory`/`directories` (globs allowed) cover every uv project; `docker` entries covering every uv project with a `Dockerfile`, each `docker` entry ignoring `ghcr.io/astral-sh/uv` unconditionally | The bump surface. Python: a Dependabot bump of the Dockerfile uv tag alone turns python-lint's uv-pin drift check red |
 
 ### `.pre-commit-config.yaml`
 
@@ -101,7 +105,7 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 |---|---|---|
 | `make-setup` | `setup:` recipe is exactly `pre-commit install --install-hooks` | One bootstrap command |
 | `make-hookspath` | No `core.hooksPath` anywhere in the Makefile | pre-commit refuses to install while it is set |
-| `make-coverage-pin` | Not docs. Python: a `check-coverage:` target exists. Go: `install-go-test-coverage:` installs `github.com/vladopajic/go-test-coverage/v2@v<GoTestCoverageVersion>` (`policy.go`); `check-coverage:` target exists | Local tool equals the CI action version |
+| `make-coverage-pin` | Go and Python. Python: a `check-coverage:` target exists. Go: `install-go-test-coverage:` installs `github.com/vladopajic/go-test-coverage/v2@v<GoTestCoverageVersion>` (`policy.go`); `check-coverage:` target exists | Local tool equals the CI action version |
 | `make-uv-pin` | Python only. A line `UV := uvx uv@$(shell cat .uv-version)` exists; no recipe line calls bare `uv` (use `$(UV) ...`; `uvx` and words containing `uv` are fine) | make uses the fleet uv whatever is on PATH; a different local uv rewrites `uv.lock` with another `revision` |
 
 ### Repo files
@@ -113,6 +117,12 @@ Source of truth: `internal/syncheck/policy.go`, `internal/syncheck/profile.go` a
 | `testcoverage` | `.testcoverage.yml` | Go only. Exists; leading comment block mentions `check-coverage` and `go-coverage.yml` | One file feeds the pre-push hook and CI; the comment says so |
 
 `golangci-version` is Go only as well.
+
+### Flutter profile only
+
+| Rule | File | Invariant | Why |
+|---|---|---|---|
+| `flutter-version` | `.flutter-version` | Equals `FlutterVersion`, leading `v` ignored | The fleet's Flutter SDK decision; `flutter-lint` and `flutter-test` install the SDK from this file |
 
 ### Python profile only
 
@@ -189,6 +199,7 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
    - Every `workflow_call` workflow has a policy major, and the reverse.
    - `templates/` (automerge job, vuln-fix callers for both profiles, `release-please.yml` over both the Go and Python fixtures, `Makefile.vuln.mk`, `pre-commit-go-vuln.yaml`, `dependabot.yml`) pass the rules.
    - `templates/python/` (ci.yml, dependabot.yml, pre-commit-config.yaml, Makefile) pass the Python profile over `testdata/pass-python`; its uv-pre-commit rev equals `UVVersion`, its ruff rev equals `RuffVersion`.
+   - `templates/flutter/` (ci.yml, dependabot.yml) pass the Flutter profile over `testdata/pass-flutter`; `flutter_workflows_test.go` holds the hard rules of `flutter-lint` and `flutter-test` (SHA pins, SDK version from `.flutter-version`, `lcov.info` upload).
    - `.osv-scanner-version` (read by the `py-vuln` hook) equals `OSVScannerVersion` (the `python-vuln.yml` default).
 4. Merge, then tag and roll out: [Roll out a policy change](#roll-out-a-policy-change).
 5. Callers bump `rev:` (`pre-commit autoupdate` or by hand). Until they do, they run the old policy.
@@ -213,7 +224,8 @@ git push --force origin <workflow>/v1
 
 - Before wiring, list the drift: `go run github.com/tclavelloux/promy-github-workflows/cmd/workflow-sync@<sha> --root .`.
 - `.pre-commit-config.yaml`: governance entry at the latest `hooks/vX.Y.Z` with `no-direct-commit-to-main`, `workflow-sync` and `go-vuln` / `py-vuln` (then the `vuln:` target; `vuln-target` requires both or neither).
-- `ci.yml`: `with: {workflow-sync: true}` on the `lint` job (Go, Python), or a `lint` job calling `docs-lint.yml` (docs).
+- `ci.yml`: `with: {workflow-sync: true}` on the `lint` job (Go, Python), `flutter-lint.yml` with the same input (Flutter), or a `lint` job calling `docs-lint.yml` (docs).
+- Flutter profile: root `pubspec.yaml`, `.flutter-version` equal to `FlutterVersion`, `templates/flutter/{ci.yml, dependabot.yml}`, the docs `pre-commit-config.yaml` and `Makefile`, a `pr-title.yml` calling `pr-title/v1`; add `lint / lint` and `test / test` to the `protect-main` required checks.
 - Docs profile: `.workflow-sync-profile` holding `docs`, `templates/docs/{ci.yml, pre-commit-config.yaml, dependabot.yml, Makefile}`, a `pr-title.yml` calling `pr-title/v1`; add `lint / lint` and `gitleaks` to the `protect-main` required checks.
 
 Deliberate-failure checks (a green check proves nothing):

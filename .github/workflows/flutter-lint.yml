@@ -1,0 +1,79 @@
+name: Flutter Lint
+
+# Installs the Flutter SDK from the caller's .flutter-version (one plain X.Y.Z),
+# then runs `dart format` and `dart analyze --fatal-infos`. subosito/flutter-action
+# cannot read a plain .flutter-version, so the Resolve step feeds `flutter-version`.
+# Check name: `lint / lint`.
+
+on:
+  workflow_call:
+    inputs:
+      workflow-sync:
+        description: "Run the fleet `workflow-sync` pre-commit hook at the caller's pinned `rev:` over the whole repo. Requires `- id: workflow-sync` under the promy-github-workflows entry of the caller's .pre-commit-config.yaml, and adds setup-go for that one step."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve Flutter version
+        id: flutter
+        run: |
+          # .flutter-version is the repo's pin; a missing pin is an error, never "latest".
+          if [ ! -s .flutter-version ]; then
+            echo "::error file=.flutter-version::.flutter-version is missing or empty. It is the source of truth for the Flutter SDK version."
+            exit 1
+          fi
+          version="$(head -n1 .flutter-version | tr -d '[:space:]')"
+          version="${version#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error file=.flutter-version::.flutter-version must hold one plain version such as 3.50.0, found '${version}'."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          cache: true
+
+      - name: Install dependencies
+        id: deps
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check formatting
+        run: dart format --set-exit-if-changed .
+
+      # Runs after a format failure, never after a failed setup: without the SDK or
+      # resolved packages it only buries the root cause under unresolved imports.
+      - name: Analyze
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: dart analyze --fatal-infos
+
+      # Policy and code come from the caller's immutable hook `rev:`, so the local
+      # hook and this step run the identical check. Folded into lint rather than a
+      # separate reusable workflow: Actions bills each job rounded up to a minute.
+      # A Flutter repo has no go.mod, and the hook is `language: golang`, so Go is
+      # set up here for this step only.
+      - name: Set up Go for workflow-sync
+        if: ${{ inputs.workflow-sync && !cancelled() }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+
+      - name: Check fleet governance (workflow-sync)
+        if: ${{ inputs.workflow-sync && !cancelled() }}
+        env:
+          PRE_COMMIT_VERSION: 4.6.0
+        run: pipx run --spec "pre-commit==${PRE_COMMIT_VERSION}" pre-commit run workflow-sync --all-files --color=never

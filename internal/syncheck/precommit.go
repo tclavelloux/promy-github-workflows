@@ -128,12 +128,13 @@ func (c *checker) checkPreCommit() {
 	c.checkManifestStages(repos)
 	c.checkGovernanceRepo(repos)
 	c.checkRevs(repos)
-	if c.prof != docsProfile { // no code: no coverage gate, no test suite, no vuln scan
+	// docs has no code; Flutter's coverage and vuln hooks wait for their workflows
+	if c.prof != docsProfile && c.prof != flutterProfile {
 		c.checkCoverageHook(repos)
 		c.checkNoTestHook(root, repos)
 	}
 	c.checkCommitMsgHook(repos)
-	if c.prof != docsProfile {
+	if c.prof != docsProfile && c.prof != flutterProfile {
 		c.checkVulnTarget(repos)
 	}
 }

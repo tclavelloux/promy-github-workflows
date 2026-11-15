@@ -19,10 +19,15 @@ import (
 //     a violation: letting either side win would silently drop gates.
 //  2. a regular file go.mod at the root: Go
 //  3. any tracked uv.lock or pyproject.toml: Python
-//  4. none: a `profile` violation and nothing else is checked
+//  4. a regular file pubspec.yaml at the root: Flutter (a nested one does not count)
+//  5. none: a `profile` violation and nothing else is checked
 //
-// A repo with both a root go.mod and Python files is a Go repo: the Go gates
-// are the stricter, established set, and a Go service may carry Python tooling.
+// A root pubspec.yaml next to the docs marker or a root go.mod is a violation
+// too: there is no winner to pick between two app or service signals.
+//
+// Python files are tooling next to a stronger signal: a repo with a root go.mod
+// is a Go repo, and a repo with a root pubspec.yaml is a Flutter repo, whatever
+// uv.lock or pyproject.toml it carries (nested ones included).
 type profile struct {
 	name string
 
@@ -43,8 +48,22 @@ type profile struct {
 	precommitTpl string // template named when .pre-commit-config.yaml is missing
 	dependabotTp string // template named when dependabot.yml is missing
 
-	vulnFixWorkflow string // reusable workflow vuln-fix.yml must call, and its concurrency group
+	vulnFix         vulnFixPolicy // how a .github/workflows/vuln-fix.yml is treated
+	vulnFixWorkflow string        // reusable workflow vuln-fix.yml must call, and its concurrency group (vulnFixChecked only)
 }
+
+// vulnFixPolicy says what the checker does with vuln-fix.yml in a profile.
+type vulnFixPolicy int
+
+const (
+	// vulnFixIgnored: the file is not looked at (docs: no code, nothing to fix).
+	vulnFixIgnored vulnFixPolicy = iota
+	// vulnFixChecked: optional; when present it must call vulnFixWorkflow.
+	vulnFixChecked
+	// vulnFixForbidden: no governance vuln-fix workflow exists for the profile,
+	// so any vuln-fix.yml is hand-rolled (a write token nothing reviews): a finding.
+	vulnFixForbidden
+)
 
 const ruleProfile = "profile"
 
@@ -66,6 +85,7 @@ var goProfile = &profile{
 	precommitTpl: "templates/pre-commit-go-vuln.yaml",
 	dependabotTp: "add it with gomod and github-actions ecosystems (see templates/dependabot.yml)",
 
+	vulnFix:         vulnFixChecked,
 	vulnFixWorkflow: "go-vuln-fix",
 }
 
@@ -85,6 +105,7 @@ var pythonProfile = &profile{
 	precommitTpl: "templates/python/pre-commit-config.yaml",
 	dependabotTp: "add it with uv (every uv project), docker (every uv project with a Dockerfile) and github-actions entries (see templates/python/dependabot.yml)",
 
+	vulnFix:         vulnFixChecked,
 	vulnFixWorkflow: "python-vuln-fix",
 }
 
@@ -99,6 +120,20 @@ var docsProfile = &profile{
 	dependabotTp: "add it with a github-actions entry at \"/\" (see templates/docs/dependabot.yml)",
 }
 
+// flutterProfile has no vuln, coverage or test-hook rules yet: those wait for
+// their own workflows and hooks.
+var flutterProfile = &profile{
+	name:         "flutter",
+	requiredJobs: FlutterCIRequiredJobs,
+	optionalJobs: FlutterCIOptionalJobs,
+	reusableJobs: FlutterCIReusableJobs,
+	noPermJobs:   FlutterCINoPermJobs,
+	ciMissing:    "with jobs lint, test, gitleaks; see templates/flutter/ci.yml",
+	precommitTpl: "templates/docs/pre-commit-config.yaml",
+	dependabotTp: "add it with pub and github-actions entries at \"/\" (see templates/flutter/dependabot.yml)",
+	vulnFix:      vulnFixForbidden,
+}
+
 // detectProfile returns the repo's profile, or nil with c.profileMsg set to the
 // reason (empty: nothing matched).
 func (c *checker) detectProfile() *profile {
@@ -106,6 +141,10 @@ func (c *checker) detectProfile() *profile {
 	var code []string
 	if c.isRegularFile("go.mod") {
 		code = append(code, "go.mod")
+	}
+	hasPubspec := c.isRegularFile(FlutterSignalFile)
+	if hasPubspec {
+		code = append(code, FlutterSignalFile)
 	}
 	for _, f := range c.trackedFiles() {
 		if b := posixpath.Base(f); b == "uv.lock" || b == "pyproject.toml" {
@@ -124,7 +163,15 @@ func (c *checker) detectProfile() *profile {
 		}
 		return docsProfile
 	}
-	if c.isRegularFile("go.mod") {
+	hasGoMod := c.isRegularFile("go.mod")
+	switch {
+	case hasPubspec && hasGoMod:
+		c.profileMsg = fmt.Sprintf("%s selects the Flutter profile but go.mod exists at the root; remove one (a repo has one profile, and picking a winner would silently drop gates); nothing else was checked", FlutterSignalFile)
+		return nil
+	case hasPubspec:
+		return flutterProfile // Python files beside it are tooling
+	}
+	if hasGoMod {
 		return goProfile
 	}
 	if len(code) > 0 {

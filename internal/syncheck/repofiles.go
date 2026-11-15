@@ -23,6 +23,8 @@ func (c *checker) checkRepoFiles() {
 	switch c.prof {
 	case pythonProfile:
 		c.checkPythonRepoFiles()
+	case flutterProfile:
+		c.checkFlutterRepoFiles()
 	case goProfile:
 		c.checkGolangciVersion()
 		c.checkTestCoverage()

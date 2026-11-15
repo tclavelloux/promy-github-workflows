@@ -1,0 +1,7 @@
+name: pass_flutter
+description: Fixture for the workflow-sync Flutter profile.
+publish_to: none
+version: 0.0.0
+
+environment:
+  sdk: ^3.0.0

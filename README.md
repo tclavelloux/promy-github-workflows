@@ -34,6 +34,8 @@ All are called at job level and grant `contents: read` unless stated. Never path
 | [`python-ci.yml`](#python-ciyml) | lint, typecheck, test and vuln of each uv project in one job | Python |
 | [`python-*.yml`](#python-workflows) | lint, typecheck, vuln, test (superseded by `python-ci`), docker for uv projects | Python |
 | [`docs-lint.yml`](#docs-lintyml) | `workflow-sync` for a repo with no code | Docs |
+| [`flutter-lint.yml`](#flutter-lintyml) | `dart format`, `dart analyze --fatal-infos`, `workflow-sync` | Flutter |
+| [`flutter-test.yml`](#flutter-testyml) | `flutter test --coverage` with `lcov.info` upload | Flutter |
 | [`pr-title.yml`](#pr-titleyml) | Conventional Commits PR title | All |
 | [`release-please.yml`](#release-pleaseyml) | Release PR, tag, GitHub release | All |
 | [`dependabot-automerge.yml`](#dependabot-automergeyml) | Squash-merge green bot PRs | All |
@@ -262,6 +264,39 @@ jobs:
 - `.pre-commit-config.yaml`: `- id: workflow-sync` at `hooks/v1.8.0` or later; earlier tags report `profile`.
 - Start from `templates/docs/`.
 
+### `flutter-lint.yml`
+
+Installs the Flutter SDK from the caller's `.flutter-version`, then lints. Check name `lint / lint`. No secrets.
+
+```yaml
+jobs:
+  lint:
+    if: github.event.pull_request.draft == false
+    uses: tclavelloux/promy-github-workflows/.github/workflows/flutter-lint.yml@flutter-lint/v1
+    with:
+      workflow-sync: true
+```
+
+- Input `workflow-sync` (boolean, default `false`; rule `ci-lint-sync` requires `true`). Runs the `workflow-sync` hook as the last step, even after an earlier failure; needs `- id: workflow-sync` in `.pre-commit-config.yaml`.
+- `.flutter-version`: one plain `X.Y.Z` (a leading `v` is dropped). Missing, empty or malformed fails the run; there is no `latest` fallback. The file must equal the fleet pin (rule `flutter-version`). `subosito/flutter-action` cannot read this file itself, so a resolve step passes the value as `flutter-version`.
+- Steps: `flutter pub get --enforce-lockfile` (a stale `pubspec.lock` fails), `dart format --set-exit-if-changed .`, `dart analyze --fatal-infos`. Format and analyze both report.
+- Start from `templates/flutter/`.
+
+### `flutter-test.yml`
+
+```yaml
+test:
+  if: github.event.pull_request.draft == false
+  uses: tclavelloux/promy-github-workflows/.github/workflows/flutter-test.yml@flutter-test/v1
+  with:
+    timeout-minutes: 20
+```
+
+- Check name: `test / test`.
+- Same SDK resolution and `pub get --enforce-lockfile` as `flutter-lint`.
+- Runs `flutter test --coverage`, then uploads artifact `coverage-lcov` (`coverage/lcov.info`, 1 day, `if-no-files-found: error`). Nothing gates the artifact yet.
+- Inputs: `timeout-minutes` (required, number).
+
 ### `pr-title.yml`
 
 Fails when the PR title is not a Conventional Commits string. The squash commit on `main` is the PR title, and release-please parses it.
@@ -303,7 +338,7 @@ Copy `templates/release-please.yml` verbatim to `.github/workflows/release-pleas
 - Without them, `GITHUB_TOKEN` opens the PR, CI does not run, and the run emits a `::warning`. Close and reopen the PR before merging.
 - Release PRs are never auto-merged.
 - Release PR branch: `release-please--branches--main--components--<package-name>` when `package-name` is set.
-- `promy-frontend` has no `workflow-sync` profile: copy `templates/release-please.yml` by hand, after adding the App secrets.
+- A Flutter repo copies `templates/release-please.yml` like any other profile, after adding the App secrets.
 
 ### `dependabot-automerge.yml`
 
@@ -336,6 +371,8 @@ Defaults are the Go behaviour. A uv repo adds:
         torch*
         numpy
 ```
+
+A Flutter repo passes no `ecosystems`, so pub bumps stay human-reviewed: Dependabot labels a `0.x` minor bump semver-minor although caret treats it as breaking, and the Flutter profile has no coverage or vuln gate yet. Revisit once `flutter-coverage` and `flutter-vuln` land.
 
 A refusal exits 0 with a `::notice` and a step summary. A branch behind its base under a strict ruleset, or a refused merge, also ends green; with the App secrets, a Dependabot PR gets an App-authored `@dependabot rebase`. Details and the excluded-dependency rationale: [docs/dependency-automation.md](docs/dependency-automation.md#stale-branches).
 
@@ -408,9 +445,9 @@ osv-scanner over every tracked `uv.lock`, with `python-vuln.yml`'s config lookup
 
 ### `workflow-sync`
 
-Checks the repo's CI wiring (`ci.yml`, `pr-title.yml`, `release-please.yml`, `vuln-fix.yml`, `dependabot.yml`, action pins, `.pre-commit-config.yaml`, `Makefile`, pinned tool files) against the policy at the caller's pinned `rev:`. Profile Go, Python or docs. `language: golang`: needs `go` on `PATH`. Stages `pre-commit`, `manual`.
+Checks the repo's CI wiring (`ci.yml`, `pr-title.yml`, `release-please.yml`, `vuln-fix.yml`, `dependabot.yml`, action pins, `.pre-commit-config.yaml`, `Makefile`, pinned tool files) against the policy at the caller's pinned `rev:`. Profile Go, Python, Flutter or docs. `language: golang`: needs `go` on `PATH`. Stages `pre-commit`, `manual`.
 
-- CI runs it through `go-lint`/`python-lint` with `workflow-sync: true`, or `docs-lint`.
+- CI runs it through `go-lint`/`python-lint`/`flutter-lint` with `workflow-sync: true`, or `docs-lint`.
 - Repo settings CI cannot read: `GH_TOKEN= scripts/check-repo-settings.sh`.
 - Rules, exemptions, limits: [docs/workflow-sync.md](docs/workflow-sync.md).
 - No `.githooks/` and no `core.hooksPath`: `pre-commit install` refuses while it is set (rules `no-githooks`, `make-hookspath`).
