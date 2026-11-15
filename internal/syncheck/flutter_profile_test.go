@@ -21,8 +21,10 @@ func TestFlutterProfileDetection(t *testing.T) {
 		{name: "nested pubspec.yaml is not Flutter", files: map[string]string{"app/pubspec.yaml": "x\n"}, msg: ""},
 		{name: "pubspec.yaml directory is not Flutter", dirs: []string{"pubspec.yaml"}, msg: ""},
 		{name: "pubspec.yaml + go.mod", files: map[string]string{"pubspec.yaml": "x\n", "go.mod": "x\n"}, msg: "go.mod exists"},
-		{name: "pubspec.yaml + root pyproject.toml", files: map[string]string{"pubspec.yaml": "x\n", "pyproject.toml": "x\n"}, msg: "pyproject.toml exists"},
-		{name: "pubspec.yaml + nested uv.lock", files: map[string]string{"pubspec.yaml": "x\n", "src/x/uv.lock": "x\n"}, msg: "src/x/uv.lock exists"},
+		{name: "pubspec.yaml + go.mod + Python files", files: map[string]string{"pubspec.yaml": "x\n", "go.mod": "x\n", "tools/uv.lock": "x\n"}, msg: "go.mod exists"},
+		{name: "pubspec.yaml wins over root pyproject.toml", files: map[string]string{"pubspec.yaml": "x\n", "pyproject.toml": "x\n"}, want: flutterProfile},
+		{name: "pubspec.yaml wins over nested uv.lock", files: map[string]string{"pubspec.yaml": "x\n", "tools/x/uv.lock": "x\n", "tools/x/pyproject.toml": "x\n"}, want: flutterProfile},
+		{name: "nested pubspec.yaml + uv.lock is Python", files: map[string]string{"app/pubspec.yaml": "x\n", "uv.lock": "x\n"}, want: pythonProfile},
 		{name: "pubspec.yaml + docs marker", files: map[string]string{"pubspec.yaml": "x\n", ProfileMarkerFile: "docs\n"}, msg: "pubspec.yaml exists"},
 	}
 	for _, tc := range cases {
@@ -51,13 +53,33 @@ func TestFlutterProfileDetection(t *testing.T) {
 	}
 }
 
-// A conflict surfaces as the one un-exemptable `profile` violation.
+// A root go.mod or the docs marker next to pubspec.yaml surfaces as the one
+// un-exemptable `profile` violation; Python tooling files do not.
 func TestFlutterProfileConflictIsViolation(t *testing.T) {
+	for name, tc := range map[string]struct{ file, content, want string }{
+		"go.mod":      {"go.mod", "module x\n", "go.mod"},
+		"docs marker": {ProfileMarkerFile, "docs\n", "pubspec.yaml"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := fixture(t, flutterPassFixture)
+			writeFile(t, root, tc.file, tc.content)
+			rep := run(t, root)
+			if len(rep.Violations) != 1 || rep.Violations[0].Rule != ruleProfile || !strings.Contains(rep.Violations[0].Message, tc.want) {
+				t.Fatalf("want exactly one profile violation naming %s, got:\n%s", tc.want, joinMessages(rep.Violations))
+			}
+		})
+	}
+}
+
+// Python tooling beside a root pubspec.yaml keeps the Flutter profile, and no
+// Python-only rule fires on it.
+func TestFlutterProfileIgnoresPythonTooling(t *testing.T) {
 	root := fixture(t, flutterPassFixture)
-	writeFile(t, root, "go.mod", "module x\n")
-	rep := run(t, root)
-	if len(rep.Violations) != 1 || rep.Violations[0].Rule != ruleProfile || !strings.Contains(rep.Violations[0].Message, "go.mod") {
-		t.Fatalf("want exactly one profile violation naming go.mod, got:\n%s", joinMessages(rep.Violations))
+	writeFile(t, root, "tools/gen/uv.lock", "x\n")
+	writeFile(t, root, "tools/gen/pyproject.toml", "not = [valid\n")
+	writeFile(t, root, "tools/gen/poetry.lock", "x\n")
+	if rep := run(t, root); !rep.OK() {
+		t.Fatalf("want clean, got:\n%s", joinMessages(rep.Violations))
 	}
 }
 
@@ -150,14 +172,20 @@ func TestFlutterDrift(t *testing.T) {
 	}
 }
 
-// Rules whose gates have not shipped for Flutter stay silent: no coverage hook,
-// no vuln target, no vuln-fix.yml check.
-func TestFlutterProfileSkipsUnshippedRules(t *testing.T) {
+// Rules whose gates have not shipped for Flutter stay silent: the fixture has no
+// check-coverage hook and no vuln target, and passes (TestPassFlutter).
+//
+// vuln-fix.yml is the exception: Flutter has no governance vuln-fix workflow, so
+// any such file is hand-rolled and fails, whatever it contains.
+func TestFlutterProfileForbidsVulnFix(t *testing.T) {
 	root := fixture(t, flutterPassFixture)
-	// A vuln-fix.yml that would fail the Go and Python rule is not checked.
-	writeFile(t, root, vfRel, "name: x\npermissions:\n  contents: read\non:\n  schedule:\n    - cron: '0 0 * * *'\njobs:\n  fix:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n")
-	if rep := run(t, root); !rep.OK() {
-		t.Fatalf("want clean, got:\n%s", joinMessages(rep.Violations))
+	writeFile(t, root, vfRel, string(govRead(t, "templates/go-vuln-fix-caller.yml")))
+	rep := run(t, root)
+	if got := ruleIDs(rep.Violations); !equalStrings(got, []string{ruleVulnFix}) {
+		t.Fatalf("rules = %v, want [vuln-fix]\n%s", got, joinMessages(rep.Violations))
+	}
+	if !strings.Contains(joinMessages(rep.Violations), "flutter profile has no governance vuln-fix workflow") {
+		t.Errorf("message does not explain the profile has no vuln-fix workflow:\n%s", joinMessages(rep.Violations))
 	}
 }
 

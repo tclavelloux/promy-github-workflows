@@ -52,8 +52,11 @@ func Run(root string) (Report, error) {
 	c.checkCI()
 	c.checkPRTitle()
 	c.checkReleasePlease()
-	if c.prof.vulnFixWorkflow != "" { // docs and Flutter have no vuln-fix workflow
+	switch c.prof.vulnFix {
+	case vulnFixChecked:
 		c.checkVulnFix()
+	case vulnFixForbidden:
+		c.forbidVulnFix()
 	}
 	c.checkDependabot()
 	c.checkPreCommit()

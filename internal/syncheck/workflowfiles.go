@@ -160,6 +160,14 @@ func (c *checker) checkVulnFix() {
 	c.checkAppSecrets(vulnFixFile, ruleVulnFix, "fix", job)
 }
 
+// forbidVulnFix reports a vuln-fix.yml in a profile with no governance vuln-fix
+// workflow: a hand-rolled fix workflow would get write access no rule reviews.
+func (c *checker) forbidVulnFix() {
+	if p := c.loadYAML(vulnFixFile); p.exists {
+		c.add(vulnFixFile, 1, ruleVulnFix, "the %s profile has no governance vuln-fix workflow, so this file cannot be checked; delete it (a hand-rolled fix workflow gets write access no rule reviews)", c.prof.name)
+	}
+}
+
 // checkVulnFixProjects requires the Python caller's with.projects to list every
 // uv project: a project left out is never patched.
 func (c *checker) checkVulnFixProjects(job *yaml.Node) {
