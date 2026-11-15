@@ -372,7 +372,7 @@ Defaults are the Go behaviour. A uv repo adds:
         numpy
 ```
 
-A Flutter repo adds `with: {ecosystems: pub}`.
+A Flutter repo passes no `ecosystems`, so pub bumps stay human-reviewed: Dependabot labels a `0.x` minor bump semver-minor although caret treats it as breaking, and the Flutter profile has no coverage or vuln gate yet. Revisit once `flutter-coverage` and `flutter-vuln` land.
 
 A refusal exits 0 with a `::notice` and a step summary. A branch behind its base under a strict ruleset, or a refused merge, also ends green; with the App secrets, a Dependabot PR gets an App-authored `@dependabot rebase`. Details and the excluded-dependency rationale: [docs/dependency-automation.md](docs/dependency-automation.md#stale-branches).
 
