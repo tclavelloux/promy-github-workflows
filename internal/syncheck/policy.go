@@ -6,6 +6,7 @@ import "fmt"
 const (
 	GovernanceRepo = "tclavelloux/promy-github-workflows"
 
+	// coverage-pin-sync.yml syncs this on Dependabot bumps of go-coverage.yml; a human still merges.
 	GoTestCoverageVersion = "2.23.0"
 	GolangciLintVersion   = "2.15.0"
 
