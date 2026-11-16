@@ -481,8 +481,8 @@ Checks the repo's CI wiring (`ci.yml`, `pr-title.yml`, `release-please.yml`, `vu
 
 `.github/workflows/ci.yml`, all blocking on every PR:
 
-- `actionlint` (`.actionlint-version`): parses every workflow, shellchecks each `run:`.
-- `zizmor` (`.zizmor-version`): security audit of the workflows.
+- `actionlint` (`.actionlint-version`, digest in `.actionlint-sha256`): parses every workflow, shellchecks each `run:`. The download is rejected on a digest mismatch.
+- `zizmor` (`.zizmor-version`, digest in `.zizmor-sha256`): security audit of the workflows. The download is rejected on a digest mismatch.
 - `workflow-sync`: `gofmt -l`, `go vet`, `go test ./...`. `governance_test.go` fails when `policy.go` drifts from the workflow defaults, `.pre-commit-hooks.yaml`, `.osv-scanner-version` or `templates/`; `python_workflows_test.go` fails when an inlined script differs from `scripts/` or a workflow breaks a hard rule (SHA pins, `persist-credentials: false`, read-only token, inputs through `env:`, timeout).
 - `python-scripts`: `python3 -m unittest discover -s scripts/tests`.
 

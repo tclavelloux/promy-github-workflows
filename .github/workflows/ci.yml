@@ -27,12 +27,25 @@ jobs:
       - name: Install actionlint
         env:
           # Pinned in .actionlint-version so the version lives in one place,
-          # mirroring how .golangci-version pins the fleet's linter.
+          # mirroring how .golangci-version pins the fleet's linter. The tarball
+          # digest sits beside it in .actionlint-sha256.
           ACTIONLINT_VERSION_FILE: .actionlint-version
+          ACTIONLINT_SHA256_FILE: .actionlint-sha256
         run: |
+          set -euo pipefail
           version="$(tr -d '[:space:]' < "$ACTIONLINT_VERSION_FILE")"
-          url="https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz"
-          curl -fsSL "$url" | tar -xz -C /usr/local/bin actionlint
+          expected="$(tr -d '[:space:]' < "$ACTIONLINT_SHA256_FILE")"
+          asset="actionlint_${version}_linux_amd64.tar.gz"
+          url="https://github.com/rhysd/actionlint/releases/download/v${version}/${asset}"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$asset" "$url"
+          # Verify against the pinned digest, not against a checksum file fetched
+          # from the same release: a tampered release would ship a matching file.
+          actual="$(sha256sum "$RUNNER_TEMP/$asset" | cut -d' ' -f1)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error file=.actionlint-sha256::actionlint v${version} sha256 is ${actual}, expected ${expected}. If you changed .actionlint-version, update .actionlint-sha256 in the same PR."
+            exit 1
+          fi
+          tar -xzf "$RUNNER_TEMP/$asset" -C /usr/local/bin actionlint
           actionlint --version
 
       # shellcheck is preinstalled on ubuntu-latest; actionlint shells out to it.
@@ -91,14 +104,27 @@ jobs:
 
       - name: Install zizmor
         env:
-          # Pinned in .zizmor-version, mirroring .actionlint-version. Installed
-          # from the released binary (not `uvx zizmor`) so this job needs no
-          # Python/uv toolchain — same reasoning as actionlint's own install step.
+          # Pinned in .zizmor-version, mirroring .actionlint-version; the tarball
+          # digest sits beside it in .zizmor-sha256. Installed from the released
+          # binary (not `uvx zizmor`) so this job needs no Python/uv toolchain,
+          # same reasoning as actionlint's own install step.
           ZIZMOR_VERSION_FILE: .zizmor-version
+          ZIZMOR_SHA256_FILE: .zizmor-sha256
         run: |
+          set -euo pipefail
           version="$(tr -d '[:space:]' < "$ZIZMOR_VERSION_FILE")"
-          url="https://github.com/zizmorcore/zizmor/releases/download/v${version}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
-          curl -fsSL "$url" | tar -xz -C /usr/local/bin zizmor
+          expected="$(tr -d '[:space:]' < "$ZIZMOR_SHA256_FILE")"
+          asset="zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          url="https://github.com/zizmorcore/zizmor/releases/download/v${version}/${asset}"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$asset" "$url"
+          # Verify against the pinned digest: zizmor publishes no checksum file,
+          # and one fetched from the same release would prove nothing anyway.
+          actual="$(sha256sum "$RUNNER_TEMP/$asset" | cut -d' ' -f1)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error file=.zizmor-sha256::zizmor v${version} sha256 is ${actual}, expected ${expected}. If you changed .zizmor-version, update .zizmor-sha256 in the same PR."
+            exit 1
+          fi
+          tar -xzf "$RUNNER_TEMP/$asset" -C /usr/local/bin zizmor
           zizmor --version
 
       - name: Audit workflows
