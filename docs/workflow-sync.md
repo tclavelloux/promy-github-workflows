@@ -231,8 +231,11 @@ git push --force origin <workflow>/v1
 - Before wiring, list the drift: `go run github.com/tclavelloux/promy-github-workflows/cmd/workflow-sync@<sha> --root .`.
 - `.pre-commit-config.yaml`: governance entry at the latest `hooks/vX.Y.Z` with `no-direct-commit-to-main`, `workflow-sync` and `go-vuln` / `py-vuln` / `flutter-vuln` (then the `vuln:` target; `vuln-target` requires both or neither).
 - `ci.yml`: `with: {workflow-sync: true}` on the `lint` job (Go, Python), `flutter-lint.yml` with the same input (Flutter), or a `lint` job calling `docs-lint.yml` (docs).
-- Flutter profile: root `pubspec.yaml`, `.flutter-version` equal to `FlutterVersion`, `templates/flutter/{ci.yml, dependabot.yml, pre-commit-config.yaml, Makefile}` (the `flutter-vuln` hook and the local Dart hooks), a `pr-title.yml` calling `pr-title/v1`; add `lint / lint`, `vuln / vuln` and `test / test` to the `protect-main` required checks.
+- Flutter profile: root `pubspec.yaml`, `.flutter-version` equal to `FlutterVersion`, `templates/flutter/{ci.yml, dependabot.yml, pre-commit-config.yaml, Makefile}` (the `flutter-vuln` hook and the local Dart hooks), a `pr-title.yml` calling `pr-title/v1`; add `lint / lint`, `vuln / vuln`, `test / test`, `gitleaks` and `pr-title / pr-title` to the `protect-main` required checks.
 - Docs profile: `.workflow-sync-profile` holding `docs`, `templates/docs/{ci.yml, pre-commit-config.yaml, dependabot.yml, Makefile}`, a `pr-title.yml` calling `pr-title/v1`; add `lint / lint` and `gitleaks` to the `protect-main` required checks.
+- Repo with an existing `protect-main` ruleset (promy-frontend requires `quality` and `lint-pr-title`): swap the old required checks for the profile's in the ruleset before merging the adoption PR.
+  - The adoption PR no longer reports the old checks, so they block it.
+  - A new check left out of the ruleset leaves the PR ungated.
 
 Deliberate-failure checks (a green check proves nothing):
 
