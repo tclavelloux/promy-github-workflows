@@ -5,8 +5,9 @@
 # - `lint` calls flutter-lint and `test` calls flutter-test. Both install the SDK
 #   from the repo's .flutter-version, which must equal the fleet pin.
 # - `vuln` calls flutter-vuln: osv-scanner over the root pubspec.lock, no SDK.
-# - Check names are fixed by the reusable workflows: `lint / lint`, `vuln / vuln`
-#   and `test / test`. Add all three to the protect-main required checks.
+# - Required checks for protect-main: `lint / lint`, `vuln / vuln`, `test / test`,
+#   `gitleaks` (the inline job below) and `pr-title / pr-title` (from pr-title.yml).
+#   The reusable workflows fix the first three names.
 # - Never path-filter a job: a required check that does not run blocks the PR.
 name: CI
 

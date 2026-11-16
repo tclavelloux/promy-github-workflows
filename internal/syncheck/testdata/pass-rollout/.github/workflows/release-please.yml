@@ -1,5 +1,6 @@
 # Canonical .github/workflows/release-please.yml for every fleet repo: Go,
-# Python, and promy-frontend (copy by hand; it has no workflow-sync profile).
+# Python and Flutter profiles, and docs repos that release (optional there:
+# absent passes, present is checked). workflow-sync rule `release-please`.
 name: Release Please
 
 on:
