@@ -1,0 +1,10 @@
+# Copy to .github/zizmor.yml in a caller repo.
+# `governance-ref` (workflow-sync) requires governance workflow refs of the form
+# `<name>/v<major>`, a moving tag. zizmor's default `unpinned-uses` policy is
+# hash-pin for every ref, so it flags each of them. This policy accepts tag refs
+# for the governance repo only; every other `uses:` stays hash-pinned.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "tclavelloux/promy-github-workflows/*": ref-pin

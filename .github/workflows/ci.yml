@@ -130,6 +130,23 @@ jobs:
       - name: Audit workflows
         run: zizmor --persona=regular .github/workflows/
 
+      # Callers copy templates/zizmor.yml to .github/zizmor.yml so zizmor accepts
+      # governance `<name>/v<major>` refs. This audits every caller shape the
+      # workflow-sync fixtures and templates ship, under that same config.
+      # templates/ci-automerge-job.yml is a job fragment, not a workflow.
+      - name: Audit caller templates and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          zizmor --persona=regular --config templates/zizmor.yml \
+            internal/syncheck/testdata/pass-*/.github/workflows/ \
+            templates/release-please.yml \
+            templates/go-vuln-fix-caller.yml \
+            templates/docs/ci.yml \
+            templates/flutter/ci.yml \
+            templates/python/ci.yml \
+            templates/python/vuln-fix.yml
+
   # Go tests include governance_test.go, which fails when the policy constants in
   # internal/syncheck/policy.go drift from go-coverage.yml, go-lint.yml,
   # pr-title.yml or templates/. Same role as the govulncheck pin step above:

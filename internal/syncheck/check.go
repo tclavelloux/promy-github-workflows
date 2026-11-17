@@ -58,6 +58,7 @@ func Run(root string) (Report, error) {
 	case vulnFixForbidden:
 		c.forbidVulnFix()
 	}
+	c.checkZizmorConfig()
 	c.checkDependabot()
 	c.checkPreCommit()
 	c.checkMakefile()
