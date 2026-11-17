@@ -58,6 +58,8 @@ func TestDrift(t *testing.T) {
 		{name: "top-level pull-requests write", edits: []edit{ed(ciRel, "permissions:\n  contents: read\n\njobs:", "permissions:\n  contents: read\n  pull-requests: write\n\njobs:")}, rules: []string{"ci-permissions"}, msg: "want exactly {contents: read}"},
 		{name: "missing draft skip", edits: []edit{ed(ciRel, "  vuln:\n    if: github.event.pull_request.draft == false\n", "  vuln:\n")}, rules: []string{"ci-draft-skip"}, msg: `job "vuln"`},
 		{name: "coverage pull-requests read", edits: []edit{ed(ciRel, "      pull-requests: write\n    uses", "      pull-requests: read\n    uses")}, rules: []string{"ci-job-permissions"}, msg: "want exactly {contents: read, pull-requests: write}"},
+		{name: "coverage secrets inherit", edits: []edit{ed(ciRel, "go-coverage.yml@go-coverage/v2\n", "go-coverage.yml@go-coverage/v2\n    secrets: inherit\n")}, rules: []string{"ci-job-permissions"}, msg: `job "coverage" secrets = inherit`},
+		{name: "coverage secrets mapping", edits: []edit{ed(ciRel, "go-coverage.yml@go-coverage/v2\n", "go-coverage.yml@go-coverage/v2\n    secrets:\n      FOO: ${{ secrets.FOO }}\n")}, rules: []string{"ci-job-permissions"}, msg: `job "coverage" secrets = (mapping)`},
 		{name: "coverage needs", edits: []edit{ed(ciRel, "    needs: test\n", "")}, rules: []string{"ci-job-permissions"}, msg: "needs"},
 		{name: "gitleaks no permissions", edits: []edit{ed(ciRel, "    permissions:\n      contents: read\n      pull-requests: read\n    steps:", "    steps:")}, rules: []string{"ci-job-permissions"}, msg: `job "gitleaks" permissions = (absent)`},
 		{name: "gitleaks fetch-depth", edits: []edit{ed(ciRel, "          fetch-depth: 0\n", "")}, rules: []string{"ci-job-permissions"}, msg: "fetch-depth"},

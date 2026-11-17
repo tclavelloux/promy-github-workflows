@@ -40,7 +40,6 @@ jobs:
       contents: read
       pull-requests: write
     uses: tclavelloux/promy-github-workflows/.github/workflows/go-coverage.yml@go-coverage/v2
-    secrets: inherit
 
   gitleaks:
     if: github.event.pull_request.draft == false
