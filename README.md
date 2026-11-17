@@ -15,6 +15,7 @@ Fleet governance for the `promy-*` repos: reusable GitHub Actions workflows, sha
 | `rev:` in `.pre-commit-config.yaml` | immutable `hooks/vX.Y.Z` | pre-commit resolves a rev once and caches it; a moving tag is never re-fetched |
 
 - Each workflow has its own tag namespace: moving `<workflow>/vN` plus immutable `<workflow>/vX.Y.Z`. A git tag is repo-wide, so a shared bare `v1` would freeze every workflow at once.
+- zizmor flags `<workflow>/vN` refs under its default `hash-pin` policy. Copy `templates/zizmor.yml` to `.github/zizmor.yml` in the caller; rule `zizmor-config` keeps it to that one policy.
 - Current majors: `go-coverage/v2`, every other workflow `/v1`. `workflow-sync` rule `governance-ref` rejects anything else: bare `v1`/`v2`, `main`, SHAs, immutable `x/v1.2.3`, frozen majors.
 - Additive change (new optional input, new default version): move the major. Semantic change: cut a new major and freeze the old one.
 - Never put `hooks/v1` in a `rev:`; pre-commit warns `appears to be a mutable reference` and the cache never updates. Cut a new `hooks/vX.Y.Z` for every hook or policy change; never move an existing one. Consumers update with `pre-commit autoupdate --repo https://github.com/tclavelloux/promy-github-workflows`.
@@ -481,7 +482,7 @@ Checks the repo's CI wiring (`ci.yml`, `pr-title.yml`, `release-please.yml`, `vu
 `.github/workflows/ci.yml`, all blocking on every PR:
 
 - `actionlint` (`.actionlint-version`, digest in `.actionlint-sha256`): parses every workflow, shellchecks each `run:`. The download is rejected on a digest mismatch.
-- `zizmor` (`.zizmor-version`, digest in `.zizmor-sha256`): security audit of the workflows. The download is rejected on a digest mismatch.
+- `zizmor` (`.zizmor-version`, digest in `.zizmor-sha256`): security audit of the workflows, then of the `pass-*` fixtures and caller templates under `templates/zizmor.yml` (the config callers copy). The download is rejected on a digest mismatch.
 - `workflow-sync`: `gofmt -l`, `go vet`, `go test ./...`. `governance_test.go` fails when `policy.go` drifts from the workflow defaults, `.pre-commit-hooks.yaml`, `.osv-scanner-version` or `templates/`; `python_workflows_test.go` fails when an inlined script differs from `scripts/` or a workflow breaks a hard rule (SHA pins, `persist-credentials: false`, read-only token, inputs through `env:`, timeout).
 - `python-scripts`: `python3 -m unittest discover -s scripts/tests`.
 

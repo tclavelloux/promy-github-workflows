@@ -11,14 +11,16 @@ const (
 	releaseFile   = ".github/workflows/release-please.yml"
 	vulnFixFile   = ".github/workflows/vuln-fix.yml"
 	dependabotYML = ".github/dependabot.yml"
+	zizmorFile    = ".github/zizmor.yml"
 
 	rulePRTitle       = "pr-title"
 	ruleReleasePlease = "release-please"
 	ruleVulnFix       = "vuln-fix"
 	ruleDependabot    = "dependabot"
+	ruleZizmorConfig  = "zizmor-config"
 )
 
-var _ = register(rulePRTitle, ruleReleasePlease, ruleVulnFix, ruleDependabot)
+var _ = register(rulePRTitle, ruleReleasePlease, ruleVulnFix, ruleDependabot, ruleZizmorConfig)
 
 // single reports whether jobs holds exactly the one job name, returning it.
 func (c *checker) singleJob(rel, rule string, root *yaml.Node, name string) *yaml.Node {
@@ -264,5 +266,56 @@ func (c *checker) checkDependabot() {
 		if !have[eco] {
 			c.add(dependabotYML, line(uk, 1), ruleDependabot, "no updates entry for package-ecosystem %q at directory \"/\"; add one", eco)
 		}
+	}
+}
+
+// checkZizmorConfig checks the optional .github/zizmor.yml. zizmor's default
+// unpinned-uses policy is hash-pin, which flags every governance ref
+// (<name>/v<major>); the one policy below accepts tags for the governance repo
+// only. Any other key could silence audits fleet-wide, so none is allowed.
+func (c *checker) checkZizmorConfig() {
+	for _, f := range []string{"zizmor.yml", "zizmor.yaml", ".github/zizmor.yaml"} {
+		if c.isRegularFile(f) {
+			c.add(f, 0, ruleZizmorConfig, "zizmor also discovers %s; keep the only config in .github/zizmor.yml (a second file can replace or bypass the checked policy)", f)
+		}
+	}
+	p := c.loadYAML(zizmorFile)
+	if !p.exists || p.root == nil {
+		return // optional file
+	}
+	root := p.root
+	if names := keys(root); len(names) != 1 || names[0] != "rules" {
+		c.add(zizmorFile, 1, ruleZizmorConfig, "top-level keys = [%s]; want only `rules` (no `disable`, `ignore` or other keys)", strings.Join(names, ", "))
+	}
+	rk, rules := get(root, "rules")
+	if rk == nil {
+		return
+	}
+	if names := keys(rules); len(names) != 1 || names[0] != "unpinned-uses" {
+		c.add(zizmorFile, rk.Line, ruleZizmorConfig, "rules = [%s]; want only `unpinned-uses` (a disabled or extra rule silences audits)", strings.Join(names, ", "))
+	}
+	uk, uu := get(rules, "unpinned-uses")
+	if uk == nil {
+		return
+	}
+	if names := keys(uu); len(names) != 1 || names[0] != "config" {
+		c.add(zizmorFile, uk.Line, ruleZizmorConfig, "rules.unpinned-uses keys = [%s]; want only `config` (no `disable`, `ignore`)", strings.Join(names, ", "))
+	}
+	cn := val(uu, "config")
+	if names := keys(cn); len(names) != 1 || names[0] != "policies" {
+		c.add(zizmorFile, line(cn, uk.Line), ruleZizmorConfig, "rules.unpinned-uses.config keys = [%s]; want only `policies`", strings.Join(keys(cn), ", "))
+	}
+	pk, pols := get(cn, "policies")
+	want := GovernanceRepo + "/*"
+	got := map[string]string{}
+	var gotParts []string
+	if isMap(pols) {
+		for i := 0; i+1 < len(pols.Content); i += 2 {
+			got[pols.Content[i].Value] = scalar(deref(pols.Content[i+1]))
+			gotParts = append(gotParts, pols.Content[i].Value+": "+got[pols.Content[i].Value])
+		}
+	}
+	if !isMap(pols) || len(got) != 1 || got[want] != "ref-pin" {
+		c.add(zizmorFile, line(pk, line(cn, uk.Line)), ruleZizmorConfig, "rules.unpinned-uses.config.policies = {%s}; want exactly {%s: ref-pin} (`*: ref-pin` or any other entry weakens the hash-pin default for every action)", strings.Join(gotParts, ", "), want)
 	}
 }
