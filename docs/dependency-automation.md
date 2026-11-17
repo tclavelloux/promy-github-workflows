@@ -65,7 +65,7 @@ Grouped PRs: one excluded name refuses the whole PR. Keep `openai` and `ultralyt
 Never merges:
 
 - Major bumps, even if listed in `merge-update-types`.
-- `github-actions` bumps: `GITHUB_TOKEN` cannot merge workflow-file changes. A human merges that group.
+- `github-actions` bumps: policy, see [Dependabot config](#dependabot-config). A human merges that group.
 - release-please PRs.
 - Anything a human touched (extra commit, other author).
 - A `python-vuln-fix` PR whose resolver also moved another package by a minor (listed under "Also moved by the resolver"): refused, waits for a human.
@@ -146,6 +146,11 @@ Shared by `go-vuln-fix` and `python-vuln-fix`:
 - `gomod` and `github-actions` groups take minor+patch; majors stay individual PRs for human review.
 - `dependency-type: all` covers indirect modules (`direct` never bumps them).
 - `cooldown: 3` delays version updates, not security updates. `go-vuln-fix` ignores cooldown.
+- `github-actions` bumps stay human-merged (decision: [promy-github-workflows#88](https://github.com/tclavelloux/promy-github-workflows/issues/88)). The gate refuses the ecosystem before any merge call, so whether `GITHUB_TOKEN` can merge workflow-file changes was never tested. Reasons:
+  - Automerging needs a standing `workflows: write` grant.
+  - A hijacked upstream release is stopped only by the cooldown.
+  - The saving is small: about 2 PRs a week fleet-wide, swept by `/next-sprint`.
+- Revisit when `github-actions` PR volume stays above about 5 a week, or once the merge path is proven on a real bump. An App-based merge reads its credentials as Dependabot secrets ("Onboard a repo", step 4).
 - Dependabot security updates and vulnerability alerts are on in every repo (`scripts/check-repo-settings.sh` checks); the `gomod-security` group is in the template.
 
 ## Limitations
