@@ -38,7 +38,8 @@ Under a strict ruleset a sibling PR merged first leaves the next one behind; Git
 - Behind before the merge: job ends green, `::notice` `branch behind base by N commit(s) ...`, Verify and Merge skipped.
 - Merge refused anyway (a sibling merged during Verify): job ends green. Behind base now: `::notice`, then the rebase request. Any other refusal: `::warning` with the GitHub error, no rebase.
 - Rebase request, Dependabot PRs: with `APP_CLIENT_ID` and `APP_PRIVATE_KEY` mapped into the job, `actions/create-github-app-token` mints a token scoped to the calling repo with `pull-requests: write` only, and the App comments `@dependabot rebase`. The step then polls 6 x 10 s for Dependabot's +1 reaction: `Rebase requested` notice when acknowledged, `Rebase not acknowledged` warning otherwise. A failed mint fails the job; a refused comment is a warning.
-- Without the App secrets: notice only (`comment @dependabot rebase by hand`). A `GITHUB_TOKEN` comment is not used: it is not honoured.
+- Dependabot-triggered runs read Dependabot secrets, not Actions secrets: the App secrets must exist as Dependabot secrets too (see `.github/workflows/coverage-pin-sync.yml`).
+- Without the App secrets (in the Dependabot store): notice only (`comment @dependabot rebase by hand`). A `GITHUB_TOKEN` comment is not used: it is not honoured.
 - Fleet-bot PRs: notice only. Nothing rebases a `fix/vuln-*` branch, and `gh pr update-branch` by a human adds a commit the gate refuses: a human merges it.
 - Dependabot's rebase push starts CI, which re-enters the job; the loop ends when the PR merges or a check fails.
 - Rejected: `gh pr merge --auto` (`allow_auto_merge: false` fleet-wide); `update-branch` with `GITHUB_TOKEN` (its push starts no CI, the PR sticks).
@@ -168,7 +169,7 @@ One PR, titled `ci: automate dependency bumps and vuln fixes`:
 1. Replace `.github/dependabot.yml` with the profile's template (`templates/dependabot.yml`, `templates/python/dependabot.yml`).
 2. Append `templates/ci-automerge-job.yml` to `ci.yml`, with every other job in `needs:`.
 3. Add `.github/workflows/vuln-fix.yml` from `templates/go-vuln-fix-caller.yml` or `templates/python/vuln-fix.yml`.
-4. Install the fleet App on the repo and add `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repo secrets; map them into the `vuln-fix` and `automerge` jobs. Skip it and fix PRs run no CI, and stale Dependabot PRs wait for a human `@dependabot rebase`.
+4. Install the fleet App on the repo and add `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repo secrets and as Dependabot secrets (`gh secret set <name> --app dependabot -R <owner>/<repo>`; see `.github/workflows/coverage-pin-sync.yml`); map them into the `vuln-fix` and `automerge` jobs. Skip it and fix PRs run no CI, and stale Dependabot PRs wait for a human `@dependabot rebase`.
 5. `.pre-commit-config.yaml`: latest immutable `hooks/vX.Y.Z`, `- id: go-vuln`, `- id: py-vuln` or `- id: flutter-vuln`, plus the `vuln:` target (`templates/Makefile.vuln.mk`, `templates/python/Makefile` or `templates/flutter/Makefile`).
 6. Merge with the keyring token: `GH_TOKEN= gh pr merge --squash`.
 
