@@ -20,7 +20,9 @@ repos:
         stages: [pre-commit]
       - id: check-added-large-files
         stages: [pre-commit]
+      - id: check-merge-conflict
       - id: check-yaml
+      - id: check-json
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.6.0

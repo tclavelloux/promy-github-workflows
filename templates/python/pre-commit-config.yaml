@@ -25,6 +25,16 @@ repos:
       - id: check-added-large-files
         stages: [pre-commit]
         args: [--maxkb=1024]
+      # basedpyright writes the baseline without a final newline.
+      - id: trailing-whitespace
+        stages: [pre-commit]
+        exclude: '(^|/)\.basedpyright/baseline\.json$'
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+        exclude: '(^|/)\.basedpyright/baseline\.json$'
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.5.0

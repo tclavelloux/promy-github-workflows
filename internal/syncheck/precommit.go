@@ -126,6 +126,7 @@ func (c *checker) checkPreCommit() {
 	c.checkInstallTypes(root)
 	c.checkDefaultStages(root)
 	c.checkManifestStages(repos)
+	c.checkHygieneHooks(root, repos)
 	c.checkGovernanceRepo(repos)
 	c.checkRevs(repos)
 	// docs has no code; Flutter's coverage hook waits for its workflow

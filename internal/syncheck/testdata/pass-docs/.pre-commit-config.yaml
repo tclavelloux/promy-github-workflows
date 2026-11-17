@@ -23,6 +23,13 @@ repos:
       - id: check-added-large-files
         stages: [pre-commit]
         args: [--maxkb=1024]
+      - id: trailing-whitespace
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.6.0

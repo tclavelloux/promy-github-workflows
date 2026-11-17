@@ -183,3 +183,36 @@ const (
 
 // InstallHookTypes is the required default_install_hook_types set.
 var InstallHookTypes = []string{"pre-commit", "commit-msg", "pre-push"}
+
+// Generic pre-commit-hooks hygiene set (precommit-hygiene-hooks). Every profile
+// requires these ids under the pre-commit-hooks repo; check-toml stays optional.
+var HygieneHooks = []string{
+	"check-added-large-files", "check-json", "check-merge-conflict", "check-yaml",
+	"end-of-file-fixer", "trailing-whitespace",
+}
+
+// HygieneKeepProbes are the paths no hygiene hook may hide, by exclude or by a
+// top-level files/exclude: hiding them disables the gate where it matters most.
+// Each profile adds one hand-written source file (the *SourceProbe constants).
+var HygieneKeepProbes = []string{".pre-commit-config.yaml", ".github/workflows/ci.yml", "README.md", ".vscode/settings.json"}
+
+const (
+	GoSourceProbe      = "main.go"
+	PythonSourceProbe  = "src/app/main.py"
+	FlutterSourceProbe = "lib/main.dart"
+)
+
+// HygieneGeneratedHooks are at least the fixers that rewrite files; a profile
+// with generated files must exclude them on these hooks.
+var HygieneGeneratedHooks = []string{"end-of-file-fixer", "trailing-whitespace"}
+
+// Generated-file probes: the excludes of HygieneGeneratedHooks must match each.
+var (
+	FlutterGeneratedProbes = []string{"lib/x.g.dart", "lib/x.freezed.dart"} // build_runner output
+	// basedpyright writes its baseline without a final newline.
+	PythonGeneratedProbes = []string{"src/app/.basedpyright/baseline.json"}
+)
+
+// HygieneTemplate is the snippet the Go profile copies (the others carry the
+// hooks in their profile template).
+const HygieneTemplate = "templates/pre-commit-hygiene.yaml"
