@@ -6,6 +6,7 @@
 |---|---|---|
 | Local hook | `workflow-sync` from `.pre-commit-hooks.yaml`, built with the system `go` (`language: golang`) | `pre-commit` stage on every commit; `pre-commit run workflow-sync --all-files` by hand |
 | CI | `Check fleet governance (workflow-sync)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml`, `python-ci.yml` (matrix index 0 only) or `flutter-lint.yml`; the only step of `docs-lint.yml` | Go/Python/Flutter caller sets `with: workflow-sync: true` on its `lint` job (Python `check` job when it uses `python-ci.yml`); docs caller's `lint` job calls `docs-lint.yml` (no input) |
+| CI | `Audit workflows (zizmor)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml`, `python-ci.yml` (matrix index 0 only), `flutter-lint.yml` and `docs-lint.yml`, after `Install zizmor` | Caller sets `with: zizmor: true` on that job; opt-in, no rule requires it. `.github/zizmor.yml` is auto-discovered |
 | By hand | `scripts/check-repo-settings.sh` | `GH_TOKEN= scripts/check-repo-settings.sh [owner/repo ...]` |
 | Governance repo CI | `workflow-sync` job in `ci.yml`: gofmt, `go vet`, `go test` | Every PR here |
 
@@ -211,6 +212,7 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
    - `templates/flutter/` (ci.yml, dependabot.yml, pre-commit-config.yaml, Makefile) pass the Flutter profile over `testdata/pass-flutter`; `flutter_workflows_test.go` holds the hard rules of `flutter-lint`, `flutter-test` and `flutter-vuln` (SHA pins, SDK version from `.flutter-version`, `lcov.info` upload, root-lock scan).
    - `templates/zizmor.yml` passes `zizmor-config` and is byte-identical to the `.github/zizmor.yml` of the `pass-service`, `pass-python`, `pass-flutter` and `pass-docs` fixtures.
    - `.osv-scanner-version` (read by the `py-vuln` and `flutter-vuln` hooks) equals `OSVScannerVersion` (the `python-vuln.yml` default); the `flutter-vuln.yml` version and sha256 defaults equal `python-vuln.yml`'s.
+   - `zizmor_lint_test.go`: the `zizmor-version` and `zizmor-sha256` defaults of the five lint workflows equal `.zizmor-version` and `.zizmor-sha256`; the `zizmor install` block is byte-identical across them and governance `ci.yml`.
    - CI `zizmor` job audits every `pass-*` fixture and the caller templates with `templates/zizmor.yml`: a template or fixture change that zizmor flags fails there.
 4. Merge, then tag and roll out: [Roll out a policy change](#roll-out-a-policy-change).
 5. Callers bump `rev:` (`pre-commit autoupdate` or by hand). Until they do, they run the old policy.
@@ -236,7 +238,7 @@ git push --force origin <workflow>/v1
 - Before wiring, list the drift: `go run github.com/tclavelloux/promy-github-workflows/cmd/workflow-sync@<sha> --root .`.
 - `.pre-commit-config.yaml`: governance entry at the latest `hooks/vX.Y.Z` with `no-direct-commit-to-main`, `workflow-sync` and `go-vuln` / `py-vuln` / `flutter-vuln` (then the `vuln:` target; `vuln-target` requires both or neither).
 - `ci.yml`: `with: {workflow-sync: true}` on the `lint` job (Go, Python), `flutter-lint.yml` with the same input (Flutter), or a `lint` job calling `docs-lint.yml` (docs).
-- Every profile: copy `templates/zizmor.yml` to `.github/zizmor.yml`, then run `uvx zizmor@<version in .zizmor-version> --persona=regular .github/workflows/`. Expect no findings.
+- Every profile: copy `templates/zizmor.yml` to `.github/zizmor.yml` and set `zizmor: true` on the lint job (Python: the `check` job when it uses `python-ci.yml`). Pre-check locally with `uvx zizmor@<version in .zizmor-version> --persona=regular .github/workflows/`; expect no findings.
 - Flutter profile: root `pubspec.yaml`, `.flutter-version` equal to `FlutterVersion`, `templates/flutter/{ci.yml, dependabot.yml, pre-commit-config.yaml, Makefile}` (the `flutter-vuln` hook and the local Dart hooks), a `pr-title.yml` calling `pr-title/v1`; add `lint / lint`, `vuln / vuln`, `test / test`, `gitleaks` and `pr-title / pr-title` to the `protect-main` required checks.
 - Docs profile: `.workflow-sync-profile` holding `docs`, `templates/docs/{ci.yml, pre-commit-config.yaml, dependabot.yml, Makefile}`, a `pr-title.yml` calling `pr-title/v1`; add `lint / lint` and `gitleaks` to the `protect-main` required checks.
 - Repo with an existing `protect-main` ruleset (promy-frontend requires `quality` and `lint-pr-title`): swap the old required checks for the profile's in the ruleset before merging the adoption PR.

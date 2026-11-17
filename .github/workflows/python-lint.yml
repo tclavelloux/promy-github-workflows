@@ -33,6 +33,21 @@ on:
         required: false
         type: boolean
         default: false
+      zizmor:
+        description: "Run zizmor (`--persona=regular`) over the caller's `.github/workflows/`. The caller's `.github/zizmor.yml` (copied from `templates/zizmor.yml`) is auto-discovered; without it zizmor's default hash-pin policy flags every governance `<name>/v<major>` ref."
+        required: false
+        type: boolean
+        default: false
+      zizmor-version:
+        description: zizmor version to install (with or without a leading `v`). A different version needs its own `zizmor-sha256`.
+        required: false
+        type: string
+        default: 1.32.0
+      zizmor-sha256:
+        description: Expected sha256 of the `zizmor-x86_64-unknown-linux-gnu.tar.gz` release asset for `zizmor-version`. The download is rejected on any mismatch.
+        required: false
+        type: string
+        default: bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b
 
 permissions:
   contents: read
@@ -610,3 +625,35 @@ jobs:
         env:
           PRE_COMMIT_VERSION: 4.6.0
         run: pipx run --spec "pre-commit==${PRE_COMMIT_VERSION}" pre-commit run workflow-sync --all-files --color=never
+
+      # Verified against the pinned digest, not a checksum file fetched from the
+      # same release: zizmor publishes none, and a tampered release would ship a
+      # matching one.
+      - name: Install zizmor
+        if: ${{ strategy.job-index == 0 && inputs.zizmor && !cancelled() }}
+        env:
+          RAW_VERSION: ${{ inputs.zizmor-version }}
+          EXPECTED_SHA256: ${{ inputs.zizmor-sha256 }}
+        run: |
+          # >>> zizmor install
+          set -euo pipefail
+          version="${RAW_VERSION#v}"
+          asset="zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          url="https://github.com/zizmorcore/zizmor/releases/download/v${version}/${asset}"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$asset" "$url"
+          actual="$(sha256sum "$RUNNER_TEMP/$asset" | cut -d' ' -f1)"
+          if [ "$actual" != "$EXPECTED_SHA256" ]; then
+            echo "::error::zizmor v${version} sha256 is ${actual}, expected ${EXPECTED_SHA256}. If you changed zizmor-version, pass the matching zizmor-sha256."
+            exit 1
+          fi
+          tar -xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP" zizmor
+          install -m 0755 "$RUNNER_TEMP/zizmor" /usr/local/bin/zizmor
+          zizmor --version
+          # <<< zizmor install
+
+      # Does not require .github/zizmor.yml. Without it zizmor's own blanket
+      # hash-pin policy reports the governance refs: the intended failure signal.
+      # No GitHub token is passed, so online audits stay off.
+      - name: Audit workflows (zizmor)
+        if: ${{ strategy.job-index == 0 && inputs.zizmor && !cancelled() }}
+        run: zizmor --persona=regular .github/workflows/
