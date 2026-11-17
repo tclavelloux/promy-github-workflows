@@ -110,12 +110,11 @@ coverage:
     contents: read
     pull-requests: write
   uses: tclavelloux/promy-github-workflows/.github/workflows/go-coverage.yml@go-coverage/v2
-  secrets: inherit
 ```
 
 - A missing `.testcoverage.yml` fails the job (no zero-threshold fallback). Canonical shape: `promy-crm`'s.
 - One sticky PR comment: statement-weighted per-package breakdown; on failure, every file below threshold with its uncovered line ranges. The comment posts before the check goes red.
-- Exact `coverage` job shape: rule `ci-job-permissions`. Inputs `coverage-artifact` (default `coverage-profile`) and `profile-filename` (default `coverage.raw.out`) match what `go-test.yml` uploads.
+- Exact `coverage` job shape: rule `ci-job-permissions`. Set no `secrets:` key; `GITHUB_TOKEN` reaches the called workflow without it. Inputs `coverage-artifact` (default `coverage-profile`) and `profile-filename` (default `coverage.raw.out`) match what `go-test.yml` uploads.
 
 ### `go-vuln.yml`
 

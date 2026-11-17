@@ -283,8 +283,12 @@ func (c *checker) ciJobPermissions(byName map[string]ciJob) {
 		if need, ok := strSet(val(j.node, "needs")); !ok || !sameSet(need, setOf("test")) {
 			c.add(ciFile, line(val(j.node, "needs"), j.line()), ruleCIJobPerms, `job "coverage" needs = %s; want {test} (it downloads the test job's artifact)`, fmtSet(need))
 		}
-		if scalar(val(j.node, "secrets")) != "inherit" {
-			c.add(ciFile, line(val(j.node, "secrets"), j.line()), ruleCIJobPerms, `job "coverage" secrets = %q; want inherit (fleet convention for the coverage caller)`, scalar(val(j.node, "secrets")))
+		if k, n := get(j.node, "secrets"); k != nil {
+			got := scalar(n)
+			if got == "" {
+				got = "(mapping)"
+			}
+			c.add(ciFile, k.Line, ruleCIJobPerms, `job "coverage" secrets = %s; want no secrets: key (go-coverage reads only GITHUB_TOKEN, which a called workflow always gets; zizmor flags secrets: inherit)`, got)
 		}
 	}
 	if j, ok := byName["gitleaks"]; ok {
