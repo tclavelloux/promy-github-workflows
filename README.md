@@ -206,7 +206,7 @@ jobs:
   # vuln, test, docker: same shape with python-vuln, python-test, python-docker
 ```
 
-Start from `templates/python/` (`ci.yml`, `dependabot.yml`, `pre-commit-config.yaml`, `Makefile`, `vuln-fix.yml`).
+Start from `templates/python/` (`ci.yml`, `dependabot.yml`, `pre-commit-config.yaml` with the hygiene hooks that rule `precommit-hygiene-hooks` requires, `Makefile`, `vuln-fix.yml`).
 
 Shared contract:
 
@@ -278,7 +278,7 @@ jobs:
 
 - Root `.workflow-sync-profile` holding `docs`. A root `go.mod` or a tracked `uv.lock`/`pyproject.toml` beside it fails with `profile`.
 - `.pre-commit-config.yaml`: `- id: workflow-sync` at `hooks/v1.8.0` or later; earlier tags report `profile`.
-- Start from `templates/docs/`.
+- Start from `templates/docs/`; its `pre-commit-config.yaml` carries the hygiene hooks that rule `precommit-hygiene-hooks` requires.
 
 ### `flutter-lint.yml`
 
@@ -298,7 +298,7 @@ jobs:
 - Inputs `zizmor`, `zizmor-version`, `zizmor-sha256`: as in `go-lint.yml`. The audit runs after `workflow-sync`.
 - `.flutter-version`: one plain `X.Y.Z` (a leading `v` is dropped). Missing, empty or malformed fails the run; there is no `latest` fallback. The file must equal the fleet pin (rule `flutter-version`). `subosito/flutter-action` cannot read this file itself, so a resolve step passes the value as `flutter-version`.
 - Steps: `flutter pub get --enforce-lockfile` (a stale `pubspec.lock` fails), `dart format --set-exit-if-changed .`, `dart analyze --fatal-infos`. Format and analyze both report.
-- Start from `templates/flutter/`: `ci.yml`, `pre-commit-config.yaml` (the local `dart-format`, `dart-analyze` and `flutter-test` hooks that rule `precommit-dart-hooks` requires), `Makefile`, `dependabot.yml`.
+- Start from `templates/flutter/`: `ci.yml`, `pre-commit-config.yaml` (the local `dart-format`, `dart-analyze` and `flutter-test` hooks that rule `precommit-dart-hooks` requires, and the hygiene hooks with the build_runner excludes that rule `precommit-hygiene-hooks` requires), `Makefile`, `dependabot.yml`.
 
 ### `flutter-test.yml`
 
@@ -444,7 +444,7 @@ repos:
       - id: workflow-sync
 ```
 
-Rule `precommit-governance-repo` requires this entry with an immutable rev and both `no-direct-commit-to-main` and `workflow-sync`. Rule `vuln-target` requires `go-vuln`/`py-vuln`/`flutter-vuln` iff the Makefile has a `vuln:` target.
+Rule `precommit-governance-repo` requires this entry with an immutable rev and both `no-direct-commit-to-main` and `workflow-sync`. Rule `vuln-target` requires `go-vuln`/`py-vuln`/`flutter-vuln` iff the Makefile has a `vuln:` target. Rule `precommit-hygiene-hooks` requires the generic `pre-commit-hooks` set in every profile; Go repos copy `templates/pre-commit-hygiene.yaml`, the other profiles take it from their `pre-commit-config.yaml` template.
 
 ### `no-direct-commit-to-main`
 

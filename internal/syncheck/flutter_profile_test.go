@@ -268,4 +268,12 @@ func TestTemplatesFlutter(t *testing.T) {
 	if rep := run(t, root); !rep.OK() {
 		t.Fatalf("templates/flutter fails the Flutter profile:\n%s", joinMessages(rep.Violations))
 	}
+	// The pass fixture is a byte copy of the pre-commit template, as for docs.
+	got, err := os.ReadFile(filepath.Join("testdata", flutterPassFixture, PreCommitConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(govRead(t, "templates/flutter/pre-commit-config.yaml")) {
+		t.Errorf("testdata/%s/%s differs from templates/flutter/pre-commit-config.yaml; copy the template over the fixture", flutterPassFixture, PreCommitConfig)
+	}
 }

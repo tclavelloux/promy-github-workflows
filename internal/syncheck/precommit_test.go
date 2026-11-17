@@ -45,11 +45,11 @@ func TestSyncRulesDrift(t *testing.T) {
 		{name: "manifest stages absent check-added-large-files", edits: []edit{ed(pcRel, "      - id: check-added-large-files\n        stages: [pre-commit]\n", "      - id: check-added-large-files\n")}, rules: []string{"precommit-default-stages"}, msg: `hook "check-added-large-files"`},
 		{name: "manifest stages include pre-push", edits: []edit{ed(pcRel, "      - id: trailing-whitespace\n        stages: [pre-commit]", "      - id: trailing-whitespace\n        stages: [pre-commit, pre-push]")}, rules: []string{"precommit-default-stages"}, msg: "{pre-commit, pre-push}"},
 		{name: "manifest stages legacy commit name is fine", edits: []edit{ed(pcRel, "      - id: trailing-whitespace\n        stages: [pre-commit]", "      - id: trailing-whitespace\n        stages: [commit]")}},
-		{name: "manifest hooks absent is fine", edits: []edit{
+		{name: "manifest hooks absent", edits: []edit{
 			ed(pcRel, "      - id: trailing-whitespace\n        stages: [pre-commit]\n", ""),
 			ed(pcRel, "      - id: end-of-file-fixer\n        stages: [pre-commit]\n", ""),
 			ed(pcRel, "      - id: check-added-large-files\n        stages: [pre-commit]\n", ""),
-		}},
+		}, rules: []string{"precommit-hygiene-hooks"}, msg: "check-added-large-files"},
 		{name: "governance rev hooks/v1", edits: []edit{ed(pcRel, "rev: hooks/v1.2.0", "rev: hooks/v1")}, rules: []string{"precommit-governance-repo"}, msg: "resolves a moving tag"},
 		{name: "governance rev main", edits: []edit{ed(pcRel, "rev: hooks/v1.2.0", "rev: main")}, rules: []string{"precommit-governance-repo", "precommit-rev"}, msg: `"main"`},
 		{name: "branch guard missing", edits: []edit{ed(pcRel, "      - id: no-direct-commit-to-main\n", "")}, rules: []string{"precommit-governance-repo"}, msg: "no-direct-commit-to-main"},

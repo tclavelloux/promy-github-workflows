@@ -44,9 +44,12 @@ type profile struct {
 	testEntries []string // a pre-push hook entry containing one of these duplicates check-coverage
 	sourceKind  string   // for messages: "a push with no <sourceKind> files"
 
-	ciMissing    string // message tail when ci.yml is missing
-	precommitTpl string // template named when .pre-commit-config.yaml is missing
-	dependabotTp string // template named when dependabot.yml is missing
+	ciMissing       string   // message tail when ci.yml is missing
+	precommitTpl    string   // template named when .pre-commit-config.yaml is missing
+	hygieneTpl      string   // template carrying the hygiene hooks (precommit-hygiene-hooks)
+	generatedProbes []string // see FlutterGeneratedProbes, PythonGeneratedProbes (nil: none)
+	sourceProbes    []string // hand-written source paths hygiene hooks must not hide (*SourceProbe)
+	dependabotTp    string   // template named when dependabot.yml is missing
 
 	vulnFix         vulnFixPolicy // how a .github/workflows/vuln-fix.yml is treated
 	vulnFixWorkflow string        // reusable workflow vuln-fix.yml must call, and its concurrency group (vulnFixChecked only)
@@ -83,6 +86,8 @@ var goProfile = &profile{
 	sourceKind:   ".go",
 	ciMissing:    "with jobs lint, vuln, test, coverage, gitleaks (plus docker when a Dockerfile exists)",
 	precommitTpl: "templates/pre-commit-go-vuln.yaml",
+	hygieneTpl:   HygieneTemplate,
+	sourceProbes: []string{GoSourceProbe},
 	dependabotTp: "add it with gomod and github-actions ecosystems (see templates/dependabot.yml)",
 
 	vulnFix:         vulnFixChecked,
@@ -90,20 +95,23 @@ var goProfile = &profile{
 }
 
 var pythonProfile = &profile{
-	name:         "python",
-	requiredJobs: PyCIRequiredJobs,
-	optionalJobs: PyCIOptionalJobs,
-	reusableJobs: PyCIReusableJobs,
-	noPermJobs:   PyCINoPermissionJobs,
-	vulnHook:     HookPyVuln,
-	vulnRecipe:   PyVulnRecipe,
-	vulnMkTmpl:   "templates/python/Makefile",
-	vulnPCTmpl:   "templates/python/pre-commit-config.yaml",
-	testEntries:  []string{"pytest", "make test"},
-	sourceKind:   ".py",
-	ciMissing:    "with jobs check (or the legacy lint, typecheck, vuln, test) and gitleaks (plus docker when a uv project has a Dockerfile); see templates/python/ci.yml",
-	precommitTpl: "templates/python/pre-commit-config.yaml",
-	dependabotTp: "add it with uv (every uv project), docker (every uv project with a Dockerfile) and github-actions entries (see templates/python/dependabot.yml)",
+	name:            "python",
+	requiredJobs:    PyCIRequiredJobs,
+	optionalJobs:    PyCIOptionalJobs,
+	reusableJobs:    PyCIReusableJobs,
+	noPermJobs:      PyCINoPermissionJobs,
+	vulnHook:        HookPyVuln,
+	vulnRecipe:      PyVulnRecipe,
+	vulnMkTmpl:      "templates/python/Makefile",
+	vulnPCTmpl:      "templates/python/pre-commit-config.yaml",
+	testEntries:     []string{"pytest", "make test"},
+	sourceKind:      ".py",
+	ciMissing:       "with jobs check (or the legacy lint, typecheck, vuln, test) and gitleaks (plus docker when a uv project has a Dockerfile); see templates/python/ci.yml",
+	precommitTpl:    "templates/python/pre-commit-config.yaml",
+	hygieneTpl:      "templates/python/pre-commit-config.yaml",
+	generatedProbes: PythonGeneratedProbes,
+	sourceProbes:    []string{PythonSourceProbe},
+	dependabotTp:    "add it with uv (every uv project), docker (every uv project with a Dockerfile) and github-actions entries (see templates/python/dependabot.yml)",
 
 	vulnFix:         vulnFixChecked,
 	vulnFixWorkflow: "python-vuln-fix",
@@ -117,6 +125,7 @@ var docsProfile = &profile{
 	noPermJobs:   DocsCINoPermJobs,
 	ciMissing:    "with jobs lint, gitleaks; see templates/docs/ci.yml",
 	precommitTpl: "templates/docs/pre-commit-config.yaml",
+	hygieneTpl:   "templates/docs/pre-commit-config.yaml",
 	dependabotTp: "add it with a github-actions entry at \"/\" (see templates/docs/dependabot.yml)",
 }
 
@@ -124,19 +133,22 @@ var docsProfile = &profile{
 // coverage workflow and its check-coverage hook. Its local flutter-test hook is
 // required meanwhile (precommit-dart-hooks).
 var flutterProfile = &profile{
-	name:         "flutter",
-	requiredJobs: FlutterCIRequiredJobs,
-	optionalJobs: FlutterCIOptionalJobs,
-	reusableJobs: FlutterCIReusableJobs,
-	noPermJobs:   FlutterCINoPermJobs,
-	vulnHook:     HookFlutterVuln,
-	vulnRecipe:   FlutterVulnRecipe,
-	vulnMkTmpl:   "templates/flutter/Makefile",
-	vulnPCTmpl:   "templates/flutter/pre-commit-config.yaml",
-	ciMissing:    "with jobs lint, vuln, test, gitleaks; see templates/flutter/ci.yml",
-	precommitTpl: "templates/flutter/pre-commit-config.yaml",
-	dependabotTp: "add it with pub and github-actions entries at \"/\" (see templates/flutter/dependabot.yml)",
-	vulnFix:      vulnFixForbidden,
+	name:            "flutter",
+	requiredJobs:    FlutterCIRequiredJobs,
+	optionalJobs:    FlutterCIOptionalJobs,
+	reusableJobs:    FlutterCIReusableJobs,
+	noPermJobs:      FlutterCINoPermJobs,
+	vulnHook:        HookFlutterVuln,
+	vulnRecipe:      FlutterVulnRecipe,
+	vulnMkTmpl:      "templates/flutter/Makefile",
+	vulnPCTmpl:      "templates/flutter/pre-commit-config.yaml",
+	ciMissing:       "with jobs lint, vuln, test, gitleaks; see templates/flutter/ci.yml",
+	precommitTpl:    "templates/flutter/pre-commit-config.yaml",
+	hygieneTpl:      "templates/flutter/pre-commit-config.yaml",
+	generatedProbes: FlutterGeneratedProbes,
+	sourceProbes:    []string{FlutterSourceProbe},
+	dependabotTp:    "add it with pub and github-actions entries at \"/\" (see templates/flutter/dependabot.yml)",
+	vulnFix:         vulnFixForbidden,
 }
 
 // detectProfile returns the repo's profile, or nil with c.profileMsg set to the
