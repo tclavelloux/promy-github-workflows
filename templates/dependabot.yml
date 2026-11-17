@@ -9,8 +9,9 @@
 #   accepts it; release-please treats it as non-releasing.
 # - `cooldown` is the supply-chain buffer now that gomod PRs auto-merge.
 #   Security updates bypass it.
-# - The github-actions group still needs a human merge: GITHUB_TOKEN cannot
-#   merge changes to workflow files.
+# - The github-actions group stays human-merged by policy: automerging it needs
+#   a standing `workflows: write` grant, and only the cooldown stops a hijacked
+#   upstream release. See docs/dependency-automation.md.
 version: 2
 updates:
   - package-ecosystem: github-actions
