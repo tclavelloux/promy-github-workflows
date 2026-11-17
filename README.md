@@ -96,10 +96,18 @@ test:
     timeout-minutes: 20
 ```
 
+Tests that need Redis:
+
+```yaml
+  with:
+    timeout-minutes: 20
+    redis: true
+```
+
 - Check name: `test / test` (caller job `test`, reusable job `test`). Update the branch ruleset's required context from `test`.
 - Runs `go test -race -failfast -coverpkg=./... -covermode=atomic -coverprofile=coverage.raw.out -count=1 ./...` on `ubuntu-latest`, then uploads artifact `coverage-profile` (`coverage.raw.out`, 1 day, `if-no-files-found: error`) for `coverage`. Keep the command in step with `make check-coverage`.
-- Inputs: `timeout-minutes` (required, number), `go-version-file` (default `go.mod`).
-- Runs no services: a repo whose tests need a database or Redis cannot use it (none do today).
+- Inputs: `timeout-minutes` (required, number), `go-version-file` (default `go.mod`), `redis` (boolean, default `false`).
+- `redis: true` starts `redis:7` on `localhost:6379`, waits for `redis-cli ping` to report healthy, and exports `REDIS_TEST_DSN=redis://localhost:6379/15` to the test step. No other services.
 - `workflow-sync` requires this job from `hooks/v1.11.0`; earlier tags require the inline job it replaces. Bump `rev:` in the same PR that adopts it.
 - Docs-only and release PRs skip `setup-go`, `go test` and the upload; the job still reports green.
 
