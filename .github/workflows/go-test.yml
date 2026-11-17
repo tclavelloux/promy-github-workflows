@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: go.mod
+      redis:
+        description: Start a Redis 7 container on localhost:6379 (health-checked) before the tests and export REDIS_TEST_DSN=redis://localhost:6379/15 to them.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -84,6 +89,31 @@ jobs:
         if: steps.scope.outputs.skip != 'true'
         with:
           go-version-file: ${{ inputs.go-version-file }}
+
+      # A step, not `services:`: a caller cannot pass `services:` to a reusable workflow and
+      # job-level `services:` cannot be conditional. Tag, not digest: the fleet pins images by
+      # tag and a digest here has no Dependabot bump path. DB 15 keeps tests off the default DB.
+      - name: Start Redis
+        if: inputs.redis && steps.scope.outputs.skip != 'true'
+        shell: bash
+        env:
+          REDIS_IMAGE: redis:7
+        run: |
+          set -euo pipefail
+          docker run -d --name redis -p 6379:6379 \
+            --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30 \
+            "$REDIS_IMAGE"
+          for _ in $(seq 1 60); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' redis)"
+            if [ "$status" = healthy ]; then
+              echo "REDIS_TEST_DSN=redis://localhost:6379/15" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs redis || true
+          echo "::error::Redis did not become healthy within 60s (last status: ${status:-unknown})."
+          exit 1
 
       # Keep in step with `make check-coverage` in the caller.
       - name: Run tests
