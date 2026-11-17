@@ -150,7 +150,7 @@ Shared by `go-vuln-fix` and `python-vuln-fix`:
   - Automerging needs a standing `workflows: write` grant.
   - A hijacked upstream release is stopped only by the cooldown.
   - The saving is small: about 2 PRs a week fleet-wide, swept by `/next-sprint`.
-- Revisit when `github-actions` PR volume stays above about 5 a week, or when [#84](https://github.com/tclavelloux/promy-github-workflows/issues/84) is fixed and the merge path is proven.
+- Revisit when `github-actions` PR volume stays above about 5 a week, or once the merge path is proven on a real bump. An App-based merge reads its credentials as Dependabot secrets ("Onboard a repo", step 4).
 - Dependabot security updates and vulnerability alerts are on in every repo (`scripts/check-repo-settings.sh` checks); the `gomod-security` group is in the template.
 
 ## Limitations
