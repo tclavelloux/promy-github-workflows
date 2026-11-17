@@ -275,8 +275,12 @@ func TestDocsLintWorkflowHardRules(t *testing.T) {
 	if p, ok := readPerms(val(doc, "permissions")); !ok || !p.equal(PermsRead) {
 		t.Errorf("%s top-level permissions = %s, want %s", rel, describePerms(val(doc, "permissions")), PermsRead)
 	}
-	if in := path(doc, "on", "workflow_call", "inputs"); in != nil {
-		t.Errorf("%s declares inputs; the docs ci-lint-sync exemption assumes it has none", rel)
+	// Only the opt-in zizmor audit is switchable: workflow-sync always runs, so the
+	// docs ci-lint-sync exemption assumes no `workflow-sync` input.
+	for _, in := range keys(path(doc, "on", "workflow_call", "inputs")) {
+		if !strings.HasPrefix(in, "zizmor") {
+			t.Errorf("%s declares input %q; only the zizmor inputs are allowed (the docs ci-lint-sync exemption assumes no workflow-sync input)", rel, in)
+		}
 	}
 	if secrets := path(doc, "on", "workflow_call", "secrets"); secrets != nil {
 		t.Errorf("%s declares workflow_call secrets; it takes none", rel)

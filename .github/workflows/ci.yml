@@ -102,30 +102,38 @@ jobs:
         with:
           persist-credentials: false
 
+      # Pinned in .zizmor-version, mirroring .actionlint-version; the tarball
+      # digest sits beside it in .zizmor-sha256.
+      - name: Read zizmor pin
+        id: pin
+        run: |
+          echo "version=$(tr -d '[:space:]' < .zizmor-version)" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(tr -d '[:space:]' < .zizmor-sha256)" >> "$GITHUB_OUTPUT"
+
+      # Installed from the released binary (not `uvx zizmor`) so this job needs no
+      # Python/uv toolchain. The block between the `zizmor install` markers is the
+      # one the lint workflows inline for callers (a Go test keeps them
+      # byte-identical), so every PR here runs the code callers get.
       - name: Install zizmor
         env:
-          # Pinned in .zizmor-version, mirroring .actionlint-version; the tarball
-          # digest sits beside it in .zizmor-sha256. Installed from the released
-          # binary (not `uvx zizmor`) so this job needs no Python/uv toolchain,
-          # same reasoning as actionlint's own install step.
-          ZIZMOR_VERSION_FILE: .zizmor-version
-          ZIZMOR_SHA256_FILE: .zizmor-sha256
+          RAW_VERSION: ${{ steps.pin.outputs.version }}
+          EXPECTED_SHA256: ${{ steps.pin.outputs.sha256 }}
         run: |
+          # >>> zizmor install
           set -euo pipefail
-          version="$(tr -d '[:space:]' < "$ZIZMOR_VERSION_FILE")"
-          expected="$(tr -d '[:space:]' < "$ZIZMOR_SHA256_FILE")"
+          version="${RAW_VERSION#v}"
           asset="zizmor-x86_64-unknown-linux-gnu.tar.gz"
           url="https://github.com/zizmorcore/zizmor/releases/download/v${version}/${asset}"
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/$asset" "$url"
-          # Verify against the pinned digest: zizmor publishes no checksum file,
-          # and one fetched from the same release would prove nothing anyway.
           actual="$(sha256sum "$RUNNER_TEMP/$asset" | cut -d' ' -f1)"
-          if [ "$actual" != "$expected" ]; then
-            echo "::error file=.zizmor-sha256::zizmor v${version} sha256 is ${actual}, expected ${expected}. If you changed .zizmor-version, update .zizmor-sha256 in the same PR."
+          if [ "$actual" != "$EXPECTED_SHA256" ]; then
+            echo "::error::zizmor v${version} sha256 is ${actual}, expected ${EXPECTED_SHA256}. If you changed zizmor-version, pass the matching zizmor-sha256."
             exit 1
           fi
-          tar -xzf "$RUNNER_TEMP/$asset" -C /usr/local/bin zizmor
+          tar -xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP" zizmor
+          install -m 0755 "$RUNNER_TEMP/zizmor" /usr/local/bin/zizmor
           zizmor --version
+          # <<< zizmor install
 
       - name: Audit workflows
         run: zizmor --persona=regular .github/workflows/

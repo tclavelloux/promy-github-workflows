@@ -79,7 +79,8 @@ actionlint, zizmor:
    - actionlint: the `linux_amd64.tar.gz` line of the release's `actionlint_<version>_checksums.txt`.
    - zizmor (publishes no checksum file): `gh api repos/zizmorcore/zizmor/releases/tags/v<version> --jq '.assets[] | select(.name=="zizmor-x86_64-unknown-linux-gnu.tar.gz") | .digest'`, then strip `sha256:`.
 3. A digest is not a version, so it is not a `pin-manifest.json` entry; a stale digest fails the install step closed.
-4. Fix new findings in the same PR; both gate governance CI. The zizmor fixture and template audit also goes red when a bump changes `unpinned-uses` semantics: adjust `templates/zizmor.yml`, the `pass-*` fixture copies and `zizmor-config` together.
+4. A zizmor bump also updates the `zizmor-version` and `zizmor-sha256` defaults of `go-lint.yml`, `python-lint.yml`, `python-ci.yml`, `flutter-lint.yml` and `docs-lint.yml` in the same PR; `zizmor_lint_test.go` fails otherwise. Caller CI picks the new version up when the moving major tag moves.
+5. Fix new findings in the same PR; both gate governance CI. The zizmor fixture and template audit also goes red when a bump changes `unpinned-uses` semantics: adjust `templates/zizmor.yml`, the `pass-*` fixture copies and `zizmor-config` together.
 
 Governance hooks rev:
 

@@ -16,6 +16,7 @@ Fleet governance for the `promy-*` repos: reusable GitHub Actions workflows, sha
 
 - Each workflow has its own tag namespace: moving `<workflow>/vN` plus immutable `<workflow>/vX.Y.Z`. A git tag is repo-wide, so a shared bare `v1` would freeze every workflow at once.
 - zizmor flags `<workflow>/vN` refs under its default `hash-pin` policy. Copy `templates/zizmor.yml` to `.github/zizmor.yml` in the caller; rule `zizmor-config` keeps it to that one policy.
+- Callers get the zizmor audit from the lint workflows: `with: {zizmor: true}` on the lint job (`go-lint`, `python-lint`, `python-ci`, `flutter-lint`, `docs-lint`) plus `.github/zizmor.yml`. Opt-in, so a moving major never turns a caller red; rule `ci-lint-sync` does not require it.
 - Current majors: `go-coverage/v2`, every other workflow `/v1`. `workflow-sync` rule `governance-ref` rejects anything else: bare `v1`/`v2`, `main`, SHAs, immutable `x/v1.2.3`, frozen majors.
 - Additive change (new optional input, new default version): move the major. Semantic change: cut a new major and freeze the old one.
 - Never put `hooks/v1` in a `rev:`; pre-commit warns `appears to be a mutable reference` and the cache never updates. Cut a new `hooks/vX.Y.Z` for every hook or policy change; never move an existing one. Consumers update with `pre-commit autoupdate --repo https://github.com/tclavelloux/promy-github-workflows`.
@@ -71,6 +72,7 @@ jobs:
     uses: tclavelloux/promy-github-workflows/.github/workflows/go-lint.yml@go-lint/v1
     with:
       workflow-sync: true
+      zizmor: true
 ```
 
 Fails on:
@@ -80,6 +82,7 @@ Fails on:
 - `golangci-lint config verify`: `.golangci.yml` invalid for the pinned version.
 - `go mod tidy -diff`: `go.mod`/`go.sum` not tidy (Go 1.23+).
 - `workflow-sync` findings, when `workflow-sync: true` (required by rule `ci-lint-sync`). Runs as the last step, even after an earlier failure. Needs `- id: workflow-sync` in the caller's `.pre-commit-config.yaml`.
+- `zizmor` findings (`--persona=regular` over `.github/workflows/`), when `zizmor: true`. Runs after `workflow-sync`. Inputs `zizmor-version` and `zizmor-sha256` default to this repo's `.zizmor-version` and `.zizmor-sha256`; a different version needs its own digest.
 
 A `.golangci-version` that differs from the `golangci-lint-version` default emits a `::warning`, never a failure.
 
@@ -165,11 +168,12 @@ jobs:
     with:
       projects: '["src/leaflet","src/store"]'
       workflow-sync: true
+      zizmor: true
 ```
 
 - Check name per project: `check / check (src/store)`.
-- Inputs: `projects`, `ruff-version`, `deptry-args`, `baseline-file`, `require-baseline`, `basedpyright-args`, `markers`, `pytest-args`, `osv-scanner-version`, `osv-scanner-sha256`, `osv-args`, `workflow-sync`. Defaults and semantics equal those of the four workflows below; `args` became `basedpyright-args`, `pytest-args` and `osv-args`.
-- Steps and failure conditions: the tables of `python-lint`, `python-typecheck`, `python-test` and `python-vuln` below. Once per run (matrix index 0): ruff, pin drift, `.python-version`, `projects`, `workflow-sync`.
+- Inputs: `projects`, `ruff-version`, `deptry-args`, `baseline-file`, `require-baseline`, `basedpyright-args`, `markers`, `pytest-args`, `osv-scanner-version`, `osv-scanner-sha256`, `osv-args`, `workflow-sync`, `zizmor`, `zizmor-version`, `zizmor-sha256`. Defaults and semantics equal those of the four workflows below; `args` became `basedpyright-args`, `pytest-args` and `osv-args`.
+- Steps and failure conditions: the tables of `python-lint`, `python-typecheck`, `python-test` and `python-vuln` below. Once per run (matrix index 0): ruff, pin drift, `.python-version`, `projects`, `workflow-sync`, `zizmor` (when `zizmor: true`).
 - Logic: `scripts/python_pins.py` and `scripts/python_coverage_floor.py`, both inlined and compared byte-for-byte by the governance tests.
 - Migrating: bump the caller's `workflow-sync` hook `rev:` to the `hooks/vX.Y.Z` cut with this change (older revs reject `check` as an unknown job), replace the four caller jobs with `check`, remove them from `automerge.needs` and add `check`, swap the required checks (see below). Rule `ci-jobs` accepts either shape and rejects a mix.
 - `python-lint`, `python-typecheck`, `python-vuln` and `python-test` stay for callers that have not migrated.
@@ -217,6 +221,7 @@ Shared contract:
 | `uv lock --check` | `uv.lock` stale against `pyproject.toml` |
 | deptry | Findings in the frozen env |
 | `workflow-sync` | Findings, when `workflow-sync: true`. Needs `- id: workflow-sync` at `hooks/v1.4.0` or later (the Python profile) |
+| zizmor | Findings, when `zizmor: true` (matrix index 0 only). Inputs `zizmor-version` and `zizmor-sha256` as in `go-lint.yml` |
 
 - Drift checks read tracked files only and discover every uv project, template directories included. One annotation per mismatching file.
 - A missing pin in a uv project is an error: no `.uv-version`, no `required-version`, a Dockerfile with no uv `COPY`.
@@ -252,13 +257,15 @@ Builds each project's Dockerfile (`linux/amd64`, no push), then `docker run --rm
 
 ### `docs-lint.yml`
 
-Runs `workflow-sync` (docs profile) in a repo with no `go.mod` or `uv.lock`. Single job, check name `lint / lint`. No inputs, no secrets.
+Runs `workflow-sync` (docs profile) in a repo with no `go.mod` or `uv.lock`. Single job, check name `lint / lint`. Inputs `zizmor`, `zizmor-version`, `zizmor-sha256` (as in `go-lint.yml`); no secrets.
 
 ```yaml
 jobs:
   lint:
     if: github.event.pull_request.draft == false
     uses: tclavelloux/promy-github-workflows/.github/workflows/docs-lint.yml@docs-lint/v1
+    with:
+      zizmor: true
 ```
 
 - Root `.workflow-sync-profile` holding `docs`. A root `go.mod` or a tracked `uv.lock`/`pyproject.toml` beside it fails with `profile`.
@@ -276,9 +283,11 @@ jobs:
     uses: tclavelloux/promy-github-workflows/.github/workflows/flutter-lint.yml@flutter-lint/v1
     with:
       workflow-sync: true
+      zizmor: true
 ```
 
 - Input `workflow-sync` (boolean, default `false`; rule `ci-lint-sync` requires `true`). Runs the `workflow-sync` hook as the last step, even after an earlier failure; needs `- id: workflow-sync` in `.pre-commit-config.yaml`.
+- Inputs `zizmor`, `zizmor-version`, `zizmor-sha256`: as in `go-lint.yml`. The audit runs after `workflow-sync`.
 - `.flutter-version`: one plain `X.Y.Z` (a leading `v` is dropped). Missing, empty or malformed fails the run; there is no `latest` fallback. The file must equal the fleet pin (rule `flutter-version`). `subosito/flutter-action` cannot read this file itself, so a resolve step passes the value as `flutter-version`.
 - Steps: `flutter pub get --enforce-lockfile` (a stale `pubspec.lock` fails), `dart format --set-exit-if-changed .`, `dart analyze --fatal-infos`. Format and analyze both report.
 - Start from `templates/flutter/`: `ci.yml`, `pre-commit-config.yaml` (the local `dart-format`, `dart-analyze` and `flutter-test` hooks that rule `precommit-dart-hooks` requires), `Makefile`, `dependabot.yml`.
@@ -482,7 +491,7 @@ Checks the repo's CI wiring (`ci.yml`, `pr-title.yml`, `release-please.yml`, `vu
 `.github/workflows/ci.yml`, all blocking on every PR:
 
 - `actionlint` (`.actionlint-version`, digest in `.actionlint-sha256`): parses every workflow, shellchecks each `run:`. The download is rejected on a digest mismatch.
-- `zizmor` (`.zizmor-version`, digest in `.zizmor-sha256`): security audit of the workflows, then of the `pass-*` fixtures and caller templates under `templates/zizmor.yml` (the config callers copy). The download is rejected on a digest mismatch.
+- `zizmor` (`.zizmor-version`, digest in `.zizmor-sha256`): security audit of the workflows, then of the `pass-*` fixtures and caller templates under `templates/zizmor.yml` (the config callers copy). The download is rejected on a digest mismatch. The install step runs the same inlined block as the lint workflows' `Install zizmor` step.
 - `workflow-sync`: `gofmt -l`, `go vet`, `go test ./...`. `governance_test.go` fails when `policy.go` drifts from the workflow defaults, `.pre-commit-hooks.yaml`, `.osv-scanner-version` or `templates/`; `python_workflows_test.go` fails when an inlined script differs from `scripts/` or a workflow breaks a hard rule (SHA pins, `persist-credentials: false`, read-only token, inputs through `env:`, timeout).
 - `python-scripts`: `python3 -m unittest discover -s scripts/tests`.
 
