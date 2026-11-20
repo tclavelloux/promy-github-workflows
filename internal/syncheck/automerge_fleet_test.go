@@ -95,6 +95,8 @@ func TestLockExcluded(t *testing.T) {
 	}
 	rep := strings.ReplaceAll
 	mlBase := uvBase + "\n[[package]]\nname = \"torch\"\nversion = \"2.15.0\"\n\n[[package]]\nname = \"ultralytics\"\nversion = \"8.4.194\"\n\n[[package]]\nname = \"openai\"\nversion = \"3.42.0\"\n"
+	// torch and torchvision each ship a CPU local-version build next to the default one.
+	dual := mlBase + "\n[[package]]\nname = \"torch\"\nversion = \"2.15.0+cpu\"\n"
 	const ml = "torch*\nopencv*\nnumpy"
 	type f struct{ status, path, base, head string }
 	cases := []struct {
@@ -109,6 +111,10 @@ func TestLockExcluded(t *testing.T) {
 		{"excluded package added refused", []f{{"modified", "uv.lock", mlBase, mlBase + "\n[[package]]\nname = \"opencv-python\"\nversion = \"4.12.0\"\n"}}, ml, false, "'opencv-python' (pattern 'opencv*')"},
 		{"excluded package removed refused", []f{{"modified", "uv.lock", mlBase, rep(mlBase, "[[package]]\nname = \"torch\"\nversion = \"2.15.0\"\n", "")}}, ml, false, "'torch' (pattern 'torch*')"},
 		{"non-excluded move accepted", []f{{"modified", "uv.lock", uvBase, rep(uvBase, "2.32.3", "2.33.0")}}, ml, true, ""},
+		{"two versions of one package, unrelated bump accepted", []f{{"modified", "uv.lock", dual, rep(dual, "2.32.3", "2.32.5")}}, ml, true, ""},
+		{"two versions of one package, one moved refused", []f{{"modified", "uv.lock", dual, rep(dual, "2.15.0+cpu", "2.16.0+cpu")}}, ml, false, "'torch' (pattern 'torch*')"},
+		{"two versions of one package, one removed refused", []f{{"modified", "uv.lock", dual, mlBase}}, ml, false, "'torch' (pattern 'torch*')"},
+		{"third version of one package refused", []f{{"modified", "uv.lock", dual, dual + "\n[[package]]\nname = \"torch\"\nversion = \"2.15.0+cu128\"\n"}}, ml, false, "'torch' (pattern 'torch*')"},
 		{"lock unchanged accepted", []f{{"modified", "pyproject.toml", "a", "b"}}, ml, true, ""},
 		{"added lock refused", []f{{"added", "uv.lock", "", mlBase}}, ml, false, "is added; cannot check excluded dependencies"},
 	}

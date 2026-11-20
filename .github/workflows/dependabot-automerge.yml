@@ -276,13 +276,24 @@ jobs:
           # other changed line.
           manifest_diff() {
             awk -v OFS='\t' '
-              FNR == NR { if ($1 == "raw") oraw[$0] = 1; else o[$1 " " $2] = $3; next }
+              FNR == NR { if ($1 == "raw") oraw[$0] = 1; else { k = $1 " " $2; if (!(k in on)) { on[k] = 0; names[++nn] = k }; ov[k, ++on[k]] = $3; rem[k, $3]++ }; next }
               $1 == "raw" { nraw[$0] = 1; if (!($0 in oraw)) print "ERR", "line changed outside the version entries: " substr($0, 5); next }
-              { k = $1 " " $2; seen[k] = 1
-                if (!(k in o)) print "ERR", $2 " was added"
-                else if (o[k] != $3) print "BUMP", $1, $2, o[k], $3 }
+              { k = $1 " " $2
+                if (!(k in hseen)) { hseen[k] = 1; horder[++hn] = k }
+                if (rem[k, $3] > 0) { rem[k, $3]--; matched[k, $3]++ }
+                else { hv[k, ++hc[k]] = $3 } }
               END {
-                for (k in o) if (!(k in seen)) print "ERR", substr(k, index(k, " ") + 1) " was removed"
+                # A name may hold several versions (uv.lock can pin `torch` and `torch+cpu`).
+                # Drop versions present on both sides, then pair what is left in order.
+                for (i = 1; i <= nn; i++) { k = names[i]; bc[k] = 0
+                  for (j = 1; j <= on[k]; j++) { v = ov[k, j]
+                    if (matched[k, v] > 0) matched[k, v]--; else bv[k, ++bc[k]] = v } }
+                for (i = 1; i <= hn; i++) { k = horder[i]; kind = substr(k, 1, index(k, " ") - 1); nm = substr(k, index(k, " ") + 1)
+                  for (j = 1; j <= hc[k]; j++) {
+                    if (!(k in on) || j > bc[k]) print "ERR", nm " was added"
+                    else print "BUMP", kind, nm, bv[k, j], hv[k, j] } }
+                for (i = 1; i <= nn; i++) { k = names[i]; nm = substr(k, index(k, " ") + 1)
+                  for (j = hc[k] + 1; j <= bc[k]; j++) print "ERR", nm " was removed" }
                 for (r in oraw) if (!(r in nraw)) print "ERR", "line removed outside the version entries: " substr(r, 5)
               }
             ' "$1" "$2"
