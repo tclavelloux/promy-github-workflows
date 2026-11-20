@@ -80,8 +80,8 @@ jobs:
           # Renew or remove by PR; an expired entry fails the job. Shape is checked by
           # internal/syncheck/go_vuln_gate_test.go (expiry at most 90 days ahead).
           GO_VULN_ACCEPT: |
-            GO-2026-6875 2026-12-11 https://github.com/tclavelloux/promy-github-workflows/issues/78 echo reverse proxy forwards X-Real-IP; middleware.Proxy unused fleet-wide and not enabled by Yokai fxhttpserver v1.8.0
-            GO-2026-6872 2026-12-11 https://github.com/tclavelloux/promy-github-workflows/issues/78 echo rate limiter trusts X-Forwarded-For; middleware.RateLimiter unused fleet-wide and not enabled by Yokai fxhttpserver v1.8.0
+            GO-2026-6875 2027-01-10 https://github.com/tclavelloux/promy-github-workflows/issues/78 echo reverse proxy forwards X-Real-IP; middleware.Proxy unused fleet-wide and not enabled by Yokai fxhttpserver v1.8.0
+            GO-2026-6872 2027-01-10 https://github.com/tclavelloux/promy-github-workflows/issues/78 echo rate limiter trusts X-Forwarded-For; middleware.RateLimiter unused fleet-wide and not enabled by Yokai fxhttpserver v1.8.0
         run: |
           set -euo pipefail
 
