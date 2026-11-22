@@ -90,14 +90,14 @@ func TestSyncRulesDrift(t *testing.T) {
 		{name: "tracked .githooks", do: func(t *testing.T, r string) { writeFile(t, r, ".githooks/pre-commit", "#!/bin/sh\n") }, rules: []string{"no-githooks"}, msg: "mutually exclusive"},
 		{name: "golangci-version 2.12.0", do: func(t *testing.T, r string) { writeFile(t, r, gvRel, "2.12.0\n") }, rules: []string{"golangci-version"}, msg: "2.15.0"},
 		{name: "golangci-version v prefix ok", do: func(t *testing.T, r string) { writeFile(t, r, gvRel, "v2.15.0\n") }},
-		{name: "golangci-version missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, gvRel)) }, rules: []string{"golangci-version"}, msg: "file missing"},
+		{name: "golangci-version missing", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, gvRel)) }, rules: []string{"golangci-version"}, msg: "file missing"},
 		{name: "testcoverage header lacks go-coverage.yml", edits: []edit{ed(tcRel, "go-coverage.yml", "go-cov.yml")}, rules: []string{"testcoverage"}, msg: `"go-coverage.yml"`},
 		{name: "testcoverage header lacks check-coverage", do: func(t *testing.T, r string) {
 			writeFile(t, r, tcRel, strings.ReplaceAll(readFile(t, r, tcRel), "check-coverage", "check-cov"))
 		}, rules: []string{"testcoverage"}, msg: `"check-coverage"`},
-		{name: "testcoverage missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, tcRel)) }, rules: []string{"testcoverage"}, msg: "file missing"},
-		{name: "Makefile missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, mkRel)) }, rules: []string{"make-setup"}, msg: "file missing"},
-		{name: "pre-commit config missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, pcRel)) }, rules: []string{"precommit-install-types"}, msg: "file missing"},
+		{name: "testcoverage missing", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, tcRel)) }, rules: []string{"testcoverage"}, msg: "file missing"},
+		{name: "Makefile missing", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, mkRel)) }, rules: []string{"make-setup"}, msg: "file missing"},
+		{name: "pre-commit config missing", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, pcRel)) }, rules: []string{"precommit-install-types"}, msg: "file missing"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

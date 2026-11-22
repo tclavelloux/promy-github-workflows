@@ -184,8 +184,8 @@ func (c *checker) checkMakeSetup(mk *makefile) {
 func (c *checker) checkMakeCoverage(mk *makefile) {
 	want := "v" + GoTestCoverageVersion
 	t := mk.targets["install-go-test-coverage"]
-	switch {
-	case t == nil:
+	switch t {
+	case nil:
 		c.add(MakefileRel, 0, ruleMakeCoveragePin,
 			"no `install-go-test-coverage` target; add one running `go install github.com/vladopajic/go-test-coverage/v2@%s`", want)
 	default:

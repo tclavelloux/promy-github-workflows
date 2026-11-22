@@ -18,21 +18,21 @@ var ghEscape = strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A")
 func (r Report) Render(w io.Writer) {
 	gha := os.Getenv("GITHUB_ACTIONS") == "true"
 	for _, f := range r.Violations {
-		fmt.Fprintf(w, "%s:%d: [%s] %s\n", f.File, f.Line, f.Rule, f.Message)
+		_, _ = fmt.Fprintf(w, "%s:%d: [%s] %s\n", f.File, f.Line, f.Rule, f.Message)
 		if gha {
 			loc := "file=" + f.File
 			if f.Line > 0 {
 				loc += fmt.Sprintf(",line=%d", f.Line)
 			}
-			fmt.Fprintf(w, "::error %s,title=workflow-sync [%s]::%s\n", loc, f.Rule, ghEscape.Replace(f.Message))
+			_, _ = fmt.Fprintf(w, "::error %s,title=workflow-sync [%s]::%s\n", loc, f.Rule, ghEscape.Replace(f.Message))
 		}
 	}
 	for _, e := range r.Exemptions {
-		fmt.Fprintf(w, "workflow-sync: EXEMPT %s:%d [%s] %s\n", e.File, e.Line, e.Rule, e.Reason)
+		_, _ = fmt.Fprintf(w, "workflow-sync: EXEMPT %s:%d [%s] %s\n", e.File, e.Line, e.Rule, e.Reason)
 	}
 	status := "OK"
 	if !r.OK() {
 		status = "FAIL"
 	}
-	fmt.Fprintf(w, "workflow-sync: %s — %d violation(s), %d exemption(s)\n", status, len(r.Violations), len(r.Exemptions))
+	_, _ = fmt.Fprintf(w, "workflow-sync: %s — %d violation(s), %d exemption(s)\n", status, len(r.Violations), len(r.Exemptions))
 }

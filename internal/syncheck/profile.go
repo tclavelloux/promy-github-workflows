@@ -59,8 +59,8 @@ type profile struct {
 type vulnFixPolicy int
 
 const (
-	// vulnFixIgnored: the file is not looked at (docs: no code, nothing to fix).
-	vulnFixIgnored vulnFixPolicy = iota
+	// Zero value: the file is not looked at (docs: no code, nothing to fix).
+	_ vulnFixPolicy = iota
 	// vulnFixChecked: optional; when present it must call vulnFixWorkflow.
 	vulnFixChecked
 	// vulnFixForbidden: no governance vuln-fix workflow exists for the profile,

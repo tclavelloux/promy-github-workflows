@@ -90,14 +90,14 @@ func TestDrift(t *testing.T) {
 		{name: "go install @latest", do: func(t *testing.T, r string) {
 			writeFile(t, r, ".github/workflows/x.yml", minimalWF+"      - run: |\n          echo a\n          go install example.com/t@latest\n")
 		}, rules: []string{"unpinned-tool"}, msg: "@latest"},
-		{name: "docker job without Dockerfile", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, "Dockerfile")) }, rules: []string{"ci-jobs"}, msg: "no Dockerfile"},
+		{name: "docker job without Dockerfile", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, "Dockerfile")) }, rules: []string{"ci-jobs"}, msg: "no Dockerfile"},
 		{name: "Dockerfile without docker job", base: "pass-library", do: func(t *testing.T, r string) { writeFile(t, r, "Dockerfile", "") }, rules: []string{"ci-jobs"}, msg: "Dockerfile exists"},
 		{name: "unknown job", do: func(t *testing.T, r string) { appendFile(t, r, ciRel, extraJob) }, rules: []string{"ci-jobs"}, msg: `unknown job "extra"`},
 		{name: "required job missing", do: func(t *testing.T, r string) {
 			s := readFile(t, r, ciRel)
 			writeFile(t, r, ciRel, s[:strings.Index(s, "  gitleaks:")])
 		}, rules: []string{"ci-jobs"}, msg: `required job "gitleaks"`},
-		{name: "ci.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, ciRel)) }, rules: []string{"ci-jobs"}, msg: "file missing"},
+		{name: "ci.yml missing", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, ciRel)) }, rules: []string{"ci-jobs"}, msg: "file missing"},
 		{name: "gitleaks without timeout", edits: []edit{ed(ciRel, "    timeout-minutes: 5\n", "")}, rules: []string{"ci-timeout"}, msg: `job "gitleaks"`},
 		{name: "automerge not last", base: "pass-rollout", do: func(t *testing.T, r string) {
 			s := readFile(t, r, ciRel)
@@ -118,8 +118,8 @@ func TestDrift(t *testing.T) {
 		{name: "lint workflow-sync string", edits: []edit{ed(ciRel, "workflow-sync: true", `workflow-sync: "true"`)}, rules: []string{"ci-lint-sync"}, msg: "boolean true"},
 		{name: "pr-title missing edited", edits: []edit{ed(prRel, "opened, edited, reopened", "opened, reopened")}, rules: []string{"pr-title"}, msg: "edited"},
 		{name: "pr-title wrong job permissions", edits: []edit{ed(prRel, "      pull-requests: read", "      pull-requests: write")}, rules: []string{"pr-title"}, msg: `job "pr-title" permissions`},
-		{name: "pr-title.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, prRel)) }, rules: []string{"pr-title"}, msg: "file missing"},
-		{name: "release-please.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, rpRel)) }, rules: []string{"release-please"}, msg: "file missing"},
+		{name: "pr-title.yml missing", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, prRel)) }, rules: []string{"pr-title"}, msg: "file missing"},
+		{name: "release-please.yml missing", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, rpRel)) }, rules: []string{"release-please"}, msg: "file missing"},
 		{name: "release-please extra trigger", edits: []edit{ed(rpRel, "on:\n  push:", "on:\n  workflow_dispatch:\n  push:")}, rules: []string{"release-please"}, msg: "want exactly"},
 		{name: "release-please local copy", do: func(t *testing.T, r string) {
 			writeFile(t, r, rpRel, "name: Release Please\n\non:\n  push:\n    branches: [main]\n\npermissions:\n  contents: read\n\njobs:\n  release-please:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n      pull-requests: write\n    steps:\n      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0\n")
@@ -133,7 +133,7 @@ func TestDrift(t *testing.T) {
 		{name: "release-please wrong job name", edits: []edit{ed(rpRel, "  release-please:\n    # Must", "  release:\n    # Must")}, rules: []string{"release-please"}, msg: "want exactly one job"},
 		{name: "release-please two jobs", edits: []edit{ed(rpRel, "jobs:\n", "jobs:\n  other:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n")}, rules: []string{"release-please"}, msg: "want exactly one job"},
 		{name: "dependabot missing gomod", edits: []edit{ed(depRel, "package-ecosystem: gomod", "package-ecosystem: pip")}, rules: []string{"dependabot"}, msg: `"gomod"`},
-		{name: "dependabot.yml missing", do: func(t *testing.T, r string) { os.Remove(filepath.Join(r, depRel)) }, rules: []string{"dependabot"}, msg: "file missing"},
+		{name: "dependabot.yml missing", do: func(t *testing.T, r string) { _ = os.Remove(filepath.Join(r, depRel)) }, rules: []string{"dependabot"}, msg: "file missing"},
 		{name: "vuln-fix wrong permissions", base: "pass-rollout", edits: []edit{ed(vfRel, "issues: write", "issues: read")}, rules: []string{"vuln-fix"}, msg: `job "fix" permissions`},
 		{name: "vuln-fix calls python-vuln-fix", base: "pass-rollout", edits: []edit{ed(vfRel, "go-vuln-fix.yml@go-vuln-fix/v1", "python-vuln-fix.yml@python-vuln-fix/v1")}, rules: []string{"vuln-fix"}, msg: "go-vuln-fix.yml@go-vuln-fix/v1"},
 		{name: "vuln-fix python concurrency group", base: "pass-rollout", edits: []edit{ed(vfRel, "group: go-vuln-fix", "group: python-vuln-fix")}, rules: []string{"vuln-fix"}, msg: "want {group: go-vuln-fix, cancel-in-progress: false}"},
