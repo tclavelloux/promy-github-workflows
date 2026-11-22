@@ -501,7 +501,7 @@ Checks the repo's CI wiring (`ci.yml`, `pr-title.yml`, `release-please.yml`, `vu
 - `actionlint` (`.actionlint-version`, digest in `.actionlint-sha256`): parses every workflow, shellchecks each `run:`. The download is rejected on a digest mismatch.
 - `zizmor` (`.zizmor-version`, digest in `.zizmor-sha256`): security audit of the workflows, then of the `pass-*` fixtures and caller templates under `templates/zizmor.yml` (the config callers copy). The download is rejected on a digest mismatch. The install step runs the same inlined block as the lint workflows' `Install zizmor` step.
 - `workflow-sync`: `gofmt -l`, `go vet`, `go test ./...`. `governance_test.go` fails when `policy.go` drifts from the workflow defaults, `.pre-commit-hooks.yaml`, `.osv-scanner-version` or `templates/`; `python_workflows_test.go` fails when an inlined script differs from `scripts/` or a workflow breaks a hard rule (SHA pins, `persist-credentials: false`, read-only token, inputs through `env:`, timeout).
-- `python-scripts`: `python3 -m unittest discover -s scripts/tests`.
+- `python-scripts`: `python3.12 -m unittest discover -s scripts/tests` (needs Python >= 3.11; or `uv run --python 3.12 python -m unittest discover -s scripts/tests`).
 
 Every `uses:` here is pinned to a full commit SHA with a `# vX.Y.Z` comment. Dependabot (`github-actions`, weekly) bumps the SHAs; it never moves the `<workflow>/vN` tags, which are cut by hand.
 
