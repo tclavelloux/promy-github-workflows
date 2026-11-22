@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, ready_for_review, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,6 +18,7 @@ jobs:
   # it catches the two classes that have already bitten us: an apostrophe inside a
   # single-quoted awk program, and expression/type errors in `uses:` inputs.
   actionlint:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -95,6 +97,7 @@ jobs:
   # check: unpinned action refs, credential persistence, template-injection, etc.
   # Same fleet-wide blast radius as actionlint, so it gets the same treatment.
   zizmor:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -160,6 +163,7 @@ jobs:
   # pr-title.yml or templates/. Same role as the govulncheck pin step above:
   # CI governs a duplication this repo cannot remove.
   workflow-sync:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -191,6 +195,7 @@ jobs:
   # script; these tests prove the scripts catch each drift class. ubuntu-latest
   # ships Python 3.12; the scripts need 3.11+ for tomllib and say so if it is older.
   python-scripts:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -202,3 +207,77 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 -m unittest discover -s scripts/tests -v
+
+  # govulncheck over this repo's own Go code (the workflow-sync binary every fleet
+  # repo runs). The version comes from .govulncheck-version; the actionlint job
+  # holds go-vuln.yml and go-vuln-fix.yml equal to it. No exemption list: a
+  # finding here fails the PR.
+  vuln:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Run govulncheck
+        env:
+          # setup-go v7 defaults to `local`; the pinned govulncheck needs a newer Go.
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .govulncheck-version)"
+          go install "golang.org/x/vuln/cmd/govulncheck@v${version#v}"
+          govulncheck ./...
+
+  # golangci-lint over this repo's own Go code, default config. The version is the
+  # `golangci-lint-version` default of go-lint.yml (this repo has no
+  # .golangci-version), so it lints with what the fleet lints with.
+  lint:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Run golangci-lint
+        env:
+          # setup-go v7 defaults GOTOOLCHAIN to `local`, which makes `go install`
+          # refuse a tool whose go.mod needs a newer Go; go-lint.yml restores `auto`.
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          version="$(yq '.on.workflow_call.inputs.golangci-lint-version.default' .github/workflows/go-lint.yml | tr -d '[:space:]')"
+          go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${version#v}"
+          golangci-lint run ./...
+
+  gitleaks:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # gitleaks-action reads GET /repos/{repo}/pulls/{n}/commits to scope the scan
+    # to the PR's commit range, so it needs pull-requests: read.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

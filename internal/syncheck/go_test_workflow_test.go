@@ -52,7 +52,7 @@ func TestGoTestWorkflowRedisIsOptInStep(t *testing.T) {
 	if setup < 0 || start < 0 || run < 0 {
 		t.Fatalf("%s: step indexes setup-go=%d, Start Redis=%d, Run tests=%d, want all present", prScopeGoTest, setup, start, run)
 	}
-	if !(setup < start) || start != run-1 {
+	if setup >= start || start != run-1 {
 		t.Errorf("%s: step order setup-go=%d, Start Redis=%d, Run tests=%d, want setup-go before Start Redis and Start Redis immediately before Run tests", prScopeGoTest, setup, start, run)
 	}
 

@@ -26,7 +26,7 @@ var yamlErrLine = regexp.MustCompile(`line (\d+)`)
 func yamlErrorLine(err error) int {
 	if m := yamlErrLine.FindStringSubmatch(err.Error()); m != nil {
 		var n int
-		fmt.Sscanf(m[1], "%d", &n)
+		_, _ = fmt.Sscanf(m[1], "%d", &n)
 		return n
 	}
 	return 0

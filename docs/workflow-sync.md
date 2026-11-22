@@ -8,7 +8,7 @@
 | CI | `Check fleet governance (workflow-sync)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml`, `python-ci.yml` (matrix index 0 only) or `flutter-lint.yml`; the only step of `docs-lint.yml` | Go/Python/Flutter caller sets `with: workflow-sync: true` on its `lint` job (Python `check` job when it uses `python-ci.yml`); docs caller's `lint` job calls `docs-lint.yml` (no input) |
 | CI | `Audit workflows (zizmor)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml`, `python-ci.yml` (matrix index 0 only), `flutter-lint.yml` and `docs-lint.yml`, after `Install zizmor` | Caller sets `with: zizmor: true` on that job; opt-in, no rule requires it. `.github/zizmor.yml` is auto-discovered |
 | By hand | `scripts/check-repo-settings.sh` | `GH_TOKEN= scripts/check-repo-settings.sh [owner/repo ...]` |
-| Governance repo CI | `workflow-sync` job in `ci.yml`: gofmt, `go vet`, `go test` | Every PR here |
+| Governance repo CI | `workflow-sync` job in `ci.yml`: gofmt, `go vet`, `go test`; `vuln` (`go-vuln.yml` via local ref) and `gitleaks` jobs | Every PR here |
 
 - Local hook and CI step run the same code at the same immutable `rev:` of the caller's `.pre-commit-config.yaml`. Policy and checker ship together.
 - The hook needs Go on `PATH` locally. In CI, `setup-go` has already run in `go-lint`; `python-lint`, `python-ci`, `flutter-lint` and `docs-lint` add it for that one step.
@@ -170,6 +170,15 @@ Measured locals, never flagged:
 - exact third-party action SHAs (Dependabot owns them; only pinned-ness is checked)
 - release-please `with:`
 - extra pre-commit hooks, hygiene hook revs and args
+
+## This repo is outside the profile system
+
+`go run ./cmd/workflow-sync --root .` reports violations here by design; do not make it pass wholesale.
+
+- `pr-title.yml` and `release-please.yml` are `workflow_call` definitions; the caller rules do not apply.
+- `ci.yml` runs a custom job set (`actionlint`, `zizmor`, `workflow-sync`, `python-scripts`, `vuln`, `gitleaks`), not the Go profile's `lint/vuln/test/coverage/gitleaks`.
+- No `.pre-commit-config.yaml` or `Makefile setup`: low value for this repo.
+- A new violation count is a regression signal; compare before and after a change rather than targeting zero.
 
 ## Exemptions
 
