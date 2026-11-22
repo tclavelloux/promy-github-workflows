@@ -169,7 +169,7 @@ One PR, titled `ci: automate dependency bumps and vuln fixes`:
 1. Replace `.github/dependabot.yml` with the profile's template (`templates/dependabot.yml`, `templates/python/dependabot.yml`).
 2. Append `templates/ci-automerge-job.yml` to `ci.yml`, with every other job in `needs:`.
 3. Add `.github/workflows/vuln-fix.yml` from `templates/go-vuln-fix-caller.yml` or `templates/python/vuln-fix.yml`.
-4. Install the fleet App on the repo and add `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repo secrets and as Dependabot secrets (`gh secret set <name> --app dependabot -R <owner>/<repo>`; see `.github/workflows/coverage-pin-sync.yml`); map them into the `vuln-fix` and `automerge` jobs. Skip it and fix PRs run no CI, and stale Dependabot PRs wait for a human `@dependabot rebase`.
+4. Install the fleet App on the repo and add `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repo secrets and as Dependabot secrets (`scripts/apply-repo-settings.sh` sets both; see `.github/workflows/coverage-pin-sync.yml`); map them into the `vuln-fix` and `automerge` jobs. Skip it and fix PRs run no CI, and stale Dependabot PRs wait for a human `@dependabot rebase`.
 5. `.pre-commit-config.yaml`: latest immutable `hooks/vX.Y.Z`, `- id: go-vuln`, `- id: py-vuln` or `- id: flutter-vuln`, plus the `vuln:` target (`templates/Makefile.vuln.mk`, `templates/python/Makefile` or `templates/flutter/Makefile`).
 6. Merge with the keyring token: `GH_TOKEN= gh pr merge --squash`.
 

@@ -491,6 +491,7 @@ Checks the repo's CI wiring (`ci.yml`, `pr-title.yml`, `release-please.yml`, `vu
 
 - CI runs it through `go-lint`/`python-lint`/`flutter-lint` with `workflow-sync: true`, or `docs-lint`.
 - Repo settings CI cannot read: `GH_TOKEN= scripts/check-repo-settings.sh`.
+- New repo: `GH_TOKEN= scripts/apply-repo-settings.sh <owner/repo>` applies those settings, the `protect-main` ruleset and the App secrets ([docs/workflow-sync.md](docs/workflow-sync.md)).
 - Rules, exemptions, limits: [docs/workflow-sync.md](docs/workflow-sync.md).
 - No `.githooks/` and no `core.hooksPath`: `pre-commit install` refuses while it is set (rules `no-githooks`, `make-hookspath`).
 

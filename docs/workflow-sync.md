@@ -8,6 +8,7 @@
 | CI | `Check fleet governance (workflow-sync)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml`, `python-ci.yml` (matrix index 0 only) or `flutter-lint.yml`; the only step of `docs-lint.yml` | Go/Python/Flutter caller sets `with: workflow-sync: true` on its `lint` job (Python `check` job when it uses `python-ci.yml`); docs caller's `lint` job calls `docs-lint.yml` (no input) |
 | CI | `Audit workflows (zizmor)`, last step of the `lint` job of `go-lint.yml`, `python-lint.yml`, `python-ci.yml` (matrix index 0 only), `flutter-lint.yml` and `docs-lint.yml`, after `Install zizmor` | Caller sets `with: zizmor: true` on that job; opt-in, no rule requires it. `.github/zizmor.yml` is auto-discovered |
 | By hand | `scripts/check-repo-settings.sh` | `GH_TOKEN= scripts/check-repo-settings.sh [owner/repo ...]` |
+| By hand | `scripts/apply-repo-settings.sh`: applies what `check-repo-settings.sh` checks, the `protect-main` ruleset copied from a reference repo, and the `promy-fleet-bot` secrets; then runs the check | `GH_TOKEN= APP_CLIENT_ID=… APP_PRIVATE_KEY_FILE=<pem> scripts/apply-repo-settings.sh <owner/repo> [reference owner/repo]`, once per new repo |
 | Governance repo CI | `workflow-sync` job in `ci.yml`: gofmt, `go vet`, `go test`; `vuln` (`go-vuln.yml` via local ref) and `gitleaks` jobs | Every PR here |
 
 - Local hook and CI step run the same code at the same immutable `rev:` of the caller's `.pre-commit-config.yaml`. Policy and checker ship together.
