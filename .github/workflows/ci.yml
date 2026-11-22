@@ -226,6 +226,9 @@ jobs:
           go-version-file: go.mod
 
       - name: Run govulncheck
+        env:
+          # setup-go v7 defaults to `local`; the pinned govulncheck needs a newer Go.
+          GOTOOLCHAIN: auto
         run: |
           set -euo pipefail
           version="$(tr -d '[:space:]' < .govulncheck-version)"
