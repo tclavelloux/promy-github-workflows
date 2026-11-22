@@ -197,7 +197,7 @@ uses: actions/checkout@v4 # sync-exempt: sha-pin vendored fork, tracked in #123
 
 ## Limits
 
-- Blocks a human merge only through the `protect-main` ruleset, which requires `lint / lint` (it carries `workflow-sync`) on the six service/library repos and `workflow-sync` on this repo. The Admin role bypasses it, and a `[skip ci]` PR reports no checks, so an admin can merge past a red or missing check.
+- Blocks a human merge only through the `protect-main` ruleset, which requires `lint / lint` (it carries `workflow-sync`) on every Go service and library repo and `workflow-sync` on this repo. The Admin role bypasses it, and a `[skip ci]` PR reports no checks, so an admin can merge past a red or missing check.
 - Cannot stop `SKIP=workflow-sync` or `--no-verify` locally. CI still runs the step when the caller wired `workflow-sync: true`.
 - Cannot stop a caller pinning an old `rev:`. The old policy passes; visible in review only. The `ci-lint-sync` and `precommit-governance-repo` rules need the caller to be on a rev that has them.
 - Cannot stop a caller dropping `with: workflow-sync: true`: `ci-lint-sync` catches it only when the local hook runs.
