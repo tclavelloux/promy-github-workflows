@@ -8,9 +8,12 @@
 # - reference (default tclavelloux/promy-event-bus): the repo whose `protect-main`
 #   ruleset is copied. Pick one with the same CI job set: promy-event-bus for a Go
 #   library, promy-template-go for a Go service.
-# - App secrets: export APP_CLIENT_ID and APP_PRIVATE_KEY_FILE (path to the
-#   promy-fleet-bot .pem) to store both as Actions and Dependabot secrets. Unset,
-#   the step is skipped and reported.
+# - App secrets: set APP_CLIENT_ID and APP_PRIVATE_KEY_FILE (path to the
+#   promy-fleet-bot .pem, or <(pbpaste) to read it from the clipboard) to store
+#   both as Actions and Dependabot secrets. Unset, the step is skipped and reported.
+#   From the clipboard, clear it afterwards:
+#     GH_TOKEN= APP_CLIENT_ID=<id> APP_PRIVATE_KEY_FILE=<(pbpaste) \
+#       scripts/apply-repo-settings.sh <owner/repo>; pbcopy </dev/null
 # - The App installation cannot be scripted with a user token; the script prints
 #   the manual step.
 #
@@ -83,15 +86,17 @@ fi
 
 # Dependabot-triggered runs do not see Actions secrets: store both sets.
 if [ -n "${APP_CLIENT_ID:-}" ] && [ -n "${APP_PRIVATE_KEY_FILE:-}" ]; then
-  if [ ! -r "$APP_PRIVATE_KEY_FILE" ]; then
-    echo "apply-repo-settings: cannot read APP_PRIVATE_KEY_FILE" >&2
+  # Read once: a process substitution such as <(pbpaste) can only be read once.
+  if [ ! -r "$APP_PRIVATE_KEY_FILE" ] || ! key=$(cat "$APP_PRIVATE_KEY_FILE") || [ -z "$key" ]; then
+    echo "apply-repo-settings: cannot read APP_PRIVATE_KEY_FILE, or it is empty" >&2
     exit 2
   fi
   for app in actions dependabot; do
     echo "apply $REPO $app secrets APP_CLIENT_ID APP_PRIVATE_KEY"
     printf '%s' "$APP_CLIENT_ID" | ghx secret set APP_CLIENT_ID --app "$app" -R "$REPO"
-    ghx secret set APP_PRIVATE_KEY --app "$app" -R "$REPO" <"$APP_PRIVATE_KEY_FILE"
+    printf '%s\n' "$key" | ghx secret set APP_PRIVATE_KEY --app "$app" -R "$REPO"
   done
+  unset key
 else
   echo "SKIP $REPO app secrets: export APP_CLIENT_ID and APP_PRIVATE_KEY_FILE, then rerun"
 fi

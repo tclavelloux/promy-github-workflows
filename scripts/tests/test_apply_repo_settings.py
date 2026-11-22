@@ -4,6 +4,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import threading
 import unittest
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "apply-repo-settings.sh")
@@ -122,6 +123,38 @@ class ApplyRepoSettings(unittest.TestCase):
         self.assertIn("STDIN Iv1.abc", seen)
         self.assertIn("STDIN PEMBODY", seen)
         self.assertNotIn("PEMBODY", "".join(l for l in seen.splitlines() if l.startswith("ARGS")))
+
+    def test_key_from_single_read_pipe_reaches_both_apps(self):
+        # <(pbpaste) is a pipe: readable once. Both apps must still get the key.
+        with tempfile.TemporaryDirectory() as d:
+            fifo = os.path.join(d, "key")
+            os.mkfifo(fifo)
+
+            def feed():
+                with open(fifo, "w", encoding="utf-8") as fh:
+                    fh.write("PEMBODY")
+
+            writer = threading.Thread(target=feed)
+            writer.start()
+            code, _, _, seen = run(
+                extra_env={"APP_CLIENT_ID": "Iv1.abc", "APP_PRIVATE_KEY_FILE": fifo}
+            )
+            writer.join(timeout=5)
+        self.assertEqual(code, 0)
+        self.assertEqual(seen.count("STDIN PEMBODY"), 2)
+
+    def test_empty_key_file_exits_2(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as pem:
+            pass
+        try:
+            code, _, err, seen = run(
+                extra_env={"APP_CLIENT_ID": "Iv1.abc", "APP_PRIVATE_KEY_FILE": pem.name}
+            )
+        finally:
+            os.unlink(pem.name)
+        self.assertEqual(code, 2)
+        self.assertIn("or it is empty", err)
+        self.assertNotIn("secret set", seen)
 
     def test_unreadable_key_file_exits_2(self):
         code, _, err, _ = run(
