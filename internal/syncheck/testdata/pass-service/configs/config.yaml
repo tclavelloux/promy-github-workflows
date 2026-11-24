@@ -1,0 +1,15 @@
+app:
+  name: pass-service
+modules:
+  http:
+    server:
+      log:
+        level_from_response: false
+  sql:
+    driver: mysql
+    log:
+      enabled: true
+      arguments: true
+  trace:
+    processor:
+      type: stdout

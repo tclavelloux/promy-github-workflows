@@ -28,6 +28,7 @@ func (c *checker) checkRepoFiles() {
 	case goProfile:
 		c.checkGolangciVersion()
 		c.checkTestCoverage()
+		c.checkProdTelemetry()
 	}
 }
 
