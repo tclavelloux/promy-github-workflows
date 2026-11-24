@@ -21,6 +21,12 @@ on:
 permissions:
   contents: read
 
+# Fall back to the origin on ANY proxy error, not only 404/410 (`|`, not `,`): a dropped
+# proxy.golang.org stream (`stream error ... INTERNAL_ERROR`) otherwise fails the job.
+# sum.golang.org still verifies every module (GONOSUMDB stays unset).
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   test:
     runs-on: ubuntu-latest
