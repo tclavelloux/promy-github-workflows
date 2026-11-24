@@ -1,0 +1,11 @@
+modules:
+  http:
+    server:
+      log:
+        level_from_response: true
+  sql:
+    log:
+      arguments: false
+  trace:
+    processor:
+      type: otlp-http

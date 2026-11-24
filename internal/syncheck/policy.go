@@ -10,6 +10,11 @@ const (
 	GoTestCoverageVersion = "2.23.0"
 	GolangciLintVersion   = "2.15.0"
 
+	// ProdTraceProcessor is the only trace processor allowed in a Go service's prod
+	// config (rule prod-telemetry-config). promy-go-kit's fxotlphttp provides it;
+	// the sink is promy-steering#16.
+	ProdTraceProcessor = "otlp-http"
+
 	// Python tool versions. Ruff and osv-scanner are decided by the reusable
 	// workflows; uv by this file alone (python-lint reads the caller's .uv-version).
 	// UVVersion must equal the uv Dependabot bundles (dependabot-core
