@@ -830,7 +830,7 @@ jobs:
       # and the hook is `language: golang`, so Go is set up here for this step only.
       - name: Set up Go for workflow-sync
         if: ${{ strategy.job-index == 0 && inputs.workflow-sync && !cancelled() }}
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: stable
 
