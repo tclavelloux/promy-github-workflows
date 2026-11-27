@@ -85,9 +85,8 @@ jobs:
           # a file: a reusable workflow cannot read its own repo at the caller's ref.
           # Renew or remove by PR; an expired entry fails the job. Shape is checked by
           # internal/syncheck/go_vuln_gate_test.go (expiry at most 90 days ahead).
+          # Leave the key with an empty `|` block when nothing is accepted: the hook extractor and go_vuln_gate_test.go look for it.
           GO_VULN_ACCEPT: |
-            GO-2026-6875 2027-01-10 https://github.com/tclavelloux/promy-github-workflows/issues/78 echo/v4 fixed in 4.16.3 (GHSA-99jh-6h7p-pp36), fleet on 4.16.4; govulncheck still flags it because the Go vuln DB has no v4 fix version yet (golang/vulndb#6924), drop when it lands
-            GO-2026-6872 2027-01-10 https://github.com/tclavelloux/promy-github-workflows/issues/78 echo/v4 fixed in 4.16.3 (GHSA-246p-cpwv-v3jq), fleet on 4.16.4; govulncheck still flags it because the Go vuln DB has no v4 fix version yet (golang/vulndb#6924), drop when it lands
         run: |
           set -euo pipefail
 
