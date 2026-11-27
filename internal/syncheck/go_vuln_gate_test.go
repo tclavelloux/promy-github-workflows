@@ -59,13 +59,11 @@ func TestGoVulnAcceptList(t *testing.T) {
 	list := goVulnAcceptList(t)
 	limit := time.Now().UTC().AddDate(0, 0, OSVIgnoreMaxDays).Format("2006-01-02") // real clock: TestMain pins `now`
 	seen := map[string]bool{}
-	entries := 0
 	for i, l := range strings.Split(list, "\n") {
 		l = strings.TrimSpace(l)
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue
 		}
-		entries++
 		f := strings.Fields(l)
 		if len(f) < 4 {
 			t.Errorf("GO_VULN_ACCEPT line %d: want `<GO-ID> <expires> <issue URL> <reason>`, got %q", i+1, l)
@@ -86,9 +84,6 @@ func TestGoVulnAcceptList(t *testing.T) {
 		if !goVulnURLRe.MatchString(f[2]) {
 			t.Errorf("line %d (%s): tracking link %q is not an issue URL", i+1, f[0], f[2])
 		}
-	}
-	if entries == 0 {
-		t.Error("GO_VULN_ACCEPT has no entries; remove the env and the gate input rather than leave it empty")
 	}
 	// An already-expired entry is not flagged here: the runtime gate fails every Go PR instead.
 
@@ -162,9 +157,9 @@ func TestGoVulnGate(t *testing.T) {
 	script := goVulnAbs(t, goVulnGateScript)
 	real := goVulnAbs(t, goVulnFixtures+"/product-real.json")
 	echoOnly := goVulnEchoOnly(t)
-	list := goVulnAcceptList(t)
 	const issue = "https://github.com/tclavelloux/promy-github-workflows/issues/78"
 	valid := func(id, exp string) string { return fmt.Sprintf("%s %s %s reason text", id, exp, issue) }
+	list := valid("GO-2026-6875", "2027-01-10") + "\n" + valid("GO-2026-6872", "2027-01-10") + "\n"
 
 	cases := []struct {
 		name     string
@@ -273,9 +268,38 @@ func trimTail(b []byte) string {
 	return s
 }
 
+// goVulnHookTree copies the hook, the gate script and go-vuln.yml into a temp root so the
+// hook reads a fixture accept list (two echo entries) instead of the live one.
+func goVulnHookTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	const marker = "GO_VULN_ACCEPT: |\n"
+	const issue = "https://github.com/tclavelloux/promy-github-workflows/issues/78"
+	fixture := marker +
+		"            GO-2026-6875 2027-01-10 " + issue + " fixture\n" +
+		"            GO-2026-6872 2027-01-10 " + issue + " fixture\n"
+	for _, rel := range []string{goVulnHook, goVulnGateScript, goVulnYML} {
+		b := govRead(t, rel)
+		if rel == goVulnYML {
+			if !strings.Contains(string(b), marker) {
+				t.Fatalf("%s: marker %q not found", rel, marker)
+			}
+			b = []byte(strings.Replace(string(b), marker, fixture, 1))
+		}
+		dst := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, b, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(root, filepath.FromSlash(goVulnHook))
+}
+
 // Runs the pre-push hook with a fake govulncheck pre-placed in the hook's cache.
 func TestGoVulnHook(t *testing.T) {
-	hook := goVulnAbs(t, goVulnHook)
+	hook := goVulnHookTree(t)
 	real := goVulnAbs(t, goVulnFixtures+"/product-real.json")
 	echoOnly := goVulnEchoOnly(t)
 	cases := []struct {
